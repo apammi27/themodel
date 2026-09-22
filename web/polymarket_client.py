@@ -22,82 +22,16 @@ _cache: dict = {}
 _cache_ts: float = 0.0
 CACHE_TTL = 300  # 5 minutes
 
-# Polymarket tag slugs for each sport (used with ?tag= query param)
-_LEAGUE_TAGS = {
-    "nfl": ["nfl", "football"],
-    "nba": ["nba", "basketball"],
-    "mlb": ["mlb", "baseball"],
-    "nhl": ["nhl", "hockey"],
-    "ncaaf": ["ncaaf", "college-football"],
-    "ncaab": ["ncaab", "college-basketball"],
-}
-
-
-def fetch_sports_markets_for_league(league: str) -> list[dict]:
-    """Fetch Polymarket markets for a specific league using tag queries."""
-    tags = _LEAGUE_TAGS.get(league.lower(), [league.lower()])
-    markets: list[dict] = []
-    seen_ids: set = set()
-
-    for tag in tags:
-        offset = 0
-        limit = 100
-        while True:
-            try:
-                r = requests.get(
-                    f"{GAMMA_BASE}/markets",
-                    params={"active": "true", "closed": "false",
-                            "tag": tag, "limit": limit, "offset": offset},
-                    timeout=10,
-                )
-                r.raise_for_status()
-                batch = r.json()
-                if not batch:
-                    break
-                for m in batch:
-                    mid = m.get("id") or m.get("conditionId") or id(m)
-                    if mid not in seen_ids:
-                        seen_ids.add(mid)
-                        markets.append(m)
-                if len(batch) < limit:
-                    break
-                offset += limit
-                if offset > 500:
-                    break
-            except Exception as exc:
-                log.warning("Polymarket fetch error (tag=%s): %s", tag, exc)
-                break
-
-    log.info("Polymarket: fetched %d active markets for league=%s", len(markets), league)
-    import sys
-    for i, m in enumerate(markets[:10]):
-        print(f"  POLY[{i}] {m.get('question','')[:100]}", file=sys.stderr)
-    return markets
-
-
 def fetch_all_sports_markets(league: Optional[str] = None) -> list[dict]:
-    """Return active Polymarket sports markets (cached 5 min)."""
-    global _cache, _cache_ts
-    cache_key = f"polymarket_{league or 'all'}"
-    if time.time() - _cache_ts < CACHE_TTL and _cache.get(cache_key):
-        return _cache[cache_key]
+    """Return Polymarket sports markets.
 
-    if league:
-        markets = fetch_sports_markets_for_league(league)
-    else:
-        # Fetch for common sports leagues
-        markets = []
-        seen_ids: set = set()
-        for lg in ["nfl", "nba", "mlb"]:
-            for m in fetch_sports_markets_for_league(lg):
-                mid = m.get("id") or m.get("conditionId") or id(m)
-                if mid not in seen_ids:
-                    seen_ids.add(mid)
-                    markets.append(m)
-
-    _cache[cache_key] = markets
-    _cache_ts = time.time()
-    return markets
+    Polymarket does not offer individual game-winner markets for major US sports
+    leagues (NFL, NBA, MLB). It focuses on politics, crypto, and season-level
+    futures. Return empty list so the edge table shows '—' for Polymarket columns
+    without making unnecessary API calls.
+    """
+    log.info("Polymarket: per-game markets not available; skipping fetch")
+    return []
 
 
 def match_game(
@@ -196,18 +130,9 @@ def build_odds_map(
 ) -> dict[str, dict]:
     """
     Returns dict keyed by "{LEAGUE}|{date}|{home}|{away}" with Polymarket odds.
+    Always returns unmatched entries since Polymarket has no per-game NFL markets.
     """
-    # Group games by league so we fetch targeted markets per league
-    leagues = list({g[0].lower() for g in games})
-    markets: list[dict] = []
-    seen_ids: set = set()
-    for lg in leagues:
-        for m in fetch_all_sports_markets(league=lg):
-            mid = m.get("id") or m.get("conditionId") or id(m)
-            if mid not in seen_ids:
-                seen_ids.add(mid)
-                markets.append(m)
-
+    markets = fetch_all_sports_markets()
     result = {}
     for league, home, away, game_date in games:
         key = f"{league.upper()}|{game_date}|{home}|{away}"
