@@ -449,15 +449,32 @@ async function loadPolymarket() {
 }
 
 // ── Polymarket matching ───────────────────────────────────────────────────────
+const POLY_FUTURES_RE = /super bowl|playoffs|playoff|championship|division|mvp|season wins|season record|make the|reach the|win the nfl|win the afc|win the nfc|draft|conference/i;
+
 function matchPolymarket(league, home, away) {
   const homeAliases = getAliases(league, home);
   const awayAliases = getAliases(league, away);
+  const candidates = [];
+
   for (const m of polyMarkets) {
-    const text = ((m.question ?? '') + ' ' + (m.description ?? '')).toLowerCase();
-    if (homeAliases.some(a => text.includes(a.toLowerCase())) &&
-        awayAliases.some(a => text.includes(a.toLowerCase()))) return m;
+    const q = (m.question ?? '').trim();
+    if (!q) continue;
+    // Exclude season/playoff/futures markets
+    if (POLY_FUTURES_RE.test(q)) continue;
+    // Both teams must appear in just the question (not description — too broad)
+    const ql = q.toLowerCase();
+    const homeHit = homeAliases.some(a => ql.includes(a.toLowerCase()));
+    const awayHit = awayAliases.some(a => ql.includes(a.toLowerCase()));
+    if (!homeHit || !awayHit) continue;
+    // Prefer markets closing within 3 weeks (game markets)
+    const end = m.endDate ? new Date(m.endDate) : null;
+    const daysOut = end ? (end - Date.now()) / 86400000 : 999;
+    candidates.push({ m, daysOut });
   }
-  return null;
+  if (!candidates.length) return null;
+  // Pick closest closing date (most likely the actual game market)
+  candidates.sort((a, b) => a.daysOut - b.daysOut);
+  return candidates[0].m;
 }
 
 function parsePolyArr(val) {
@@ -587,7 +604,7 @@ function renderTable() {
       }
     }
 
-    const pm = matchPolymarket(r.league, r.home, r.away);
+    const pm = r.market === 'h2h' ? matchPolymarket(r.league, r.home, r.away) : null;
     let pProb = null, pEdge = null, pUrl = null;
     if (pm) {
       const hp = polyHomeProbability(r.league, r.home, r.away, pm);
