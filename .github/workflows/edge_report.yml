@@ -4,9 +4,12 @@ on:
   # Run automatically on NFL game days at 11 AM ET (16:00 UTC)
   # Thursday, Sunday, Monday during NFL season (Sep–Feb)
   schedule:
-    - cron: "0 16 * 9-2 0"   # Sundays
-    - cron: "0 16 * 9-2 1"   # Mondays
-    - cron: "0 16 * 9-2 4"   # Thursdays
+    - cron: "0 16 * 9-12 0"  # Sundays Sep–Dec
+    - cron: "0 16 * 1-2 0"   # Sundays Jan–Feb
+    - cron: "0 16 * 9-12 1"  # Mondays Sep–Dec
+    - cron: "0 16 * 1-2 1"   # Mondays Jan–Feb
+    - cron: "0 16 * 9-12 4"  # Thursdays Sep–Dec
+    - cron: "0 16 * 1-2 4"   # Thursdays Jan–Feb
 
   # Run manually from the Actions tab — pick any date/sports
   workflow_dispatch:
