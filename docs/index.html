@@ -343,8 +343,8 @@ function fmtPct(v) {
 }
 function fmtDate(d) {
   if (!d || d.length !== 8) return d;
-  const y = d.slice(0,4), m = d.slice(4,6), day = d.slice(6,8);
-  const dt = new Date(`${y}-${m}-${day}`);
+  const y = +d.slice(0,4), m = +d.slice(4,6) - 1, day = +d.slice(6,8);
+  const dt = new Date(y, m, day); // local date — no UTC shift
   return dt.toLocaleDateString('en-US', {month:'short', day:'numeric'});
 }
 function teamLabel(league, code) {
