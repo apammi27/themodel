@@ -406,17 +406,27 @@ async function loadPolymarket() {
     const events = Array.isArray(data) ? data : (data.events ?? []);
     for (const ev of events) {
       const evMarkets = ev.markets ?? [];
-      // Embed event question into each sub-market so matching works
-      for (const m of evMarkets) {
-        if (!m.question) m.question = ev.title ?? ev.question ?? '';
-        allMarkets.push(m);
-      }
-      // Also push the event itself in case it has outcomePrices directly
-      if (!evMarkets.length && (ev.outcomePrices || ev.outcomes)) {
+      const evSlug = ev.slug ?? '';
+      const evQuestion = ev.title ?? ev.question ?? '';
+      if (evMarkets.length) {
+        for (const m of evMarkets) {
+          // Carry event-level fields so matching and linking work
+          m._evSlug     = evSlug;
+          m._evQuestion = evQuestion;
+          m._evEndDate  = ev.endDate ?? '';
+          if (!m.question) m.question = evQuestion;
+          if (!m.endDate)  m.endDate  = ev.endDate ?? '';
+          allMarkets.push(m);
+        }
+      } else if (ev.outcomePrices || ev.outcomes) {
+        // Event is the market itself
+        ev._evSlug = evSlug;
         allMarkets.push(ev);
       }
     }
-    console.log('Poly events fetched:', events.length, '→', allMarkets.length, 'markets');
+    console.log('[Poly] events:', events.length, '→ flat markets:', allMarkets.length);
+    console.log('[Poly] sample event keys:', events[0] ? Object.keys(events[0]) : 'none');
+    if (allMarkets[0]) console.log('[Poly] sample market keys:', Object.keys(allMarkets[0]));
   } catch(e) { console.warn('Poly events failed:', e.message); }
 
   // 2. Markets endpoint with broader search terms
@@ -474,7 +484,9 @@ function matchPolymarket(league, home, away) {
   if (!candidates.length) return null;
   // Pick closest closing date (most likely the actual game market)
   candidates.sort((a, b) => a.daysOut - b.daysOut);
-  return candidates[0].m;
+  const match = candidates[0].m;
+  console.log(`[Poly] ${home} vs ${away} → q:"${match.question}" end:${match.endDate} slug:${match.slug} evSlug:${match._evSlug} prices:${match.outcomePrices} outcomes:${match.outcomes}`);
+  return match;
 }
 
 function parsePolyArr(val) {
@@ -605,19 +617,21 @@ function renderTable() {
     }
 
     const pm = r.market === 'h2h' ? matchPolymarket(r.league, r.home, r.away) : null;
-    let pProb = null, pEdge = null, pUrl = null;
+    let pProb = null, pEdge = null, pUrl = null, pTitle = '';
     if (pm) {
       const hp = polyHomeProbability(r.league, r.home, r.away, pm);
       if (hp != null) {
         pProb = isHome ? hp : 1 - hp;
         pEdge = r.prob - pProb;
-        const slug = pm.slug ?? pm.conditionId ?? '';
-        pUrl  = slug ? `https://polymarket.com/event/${slug}` : 'https://polymarket.com';
+        // Prefer event slug (links to the game page), fall back to market slug
+        const slug = pm._evSlug ?? pm.slug ?? pm.conditionId ?? '';
+        pUrl  = slug ? `https://polymarket.com/event/${slug}` : null;
+        pTitle = pm._evQuestion || pm.question || '';
       }
     }
 
     const bestEdge = Math.max(kEdge ?? -99, pEdge ?? -99);
-    return { ...r, kProb, kEdge, kUrl, kTitle, pProb, pEdge, pUrl, bestEdge };
+    return { ...r, kProb, kEdge, kUrl, kTitle, pProb, pEdge, pUrl, pTitle, bestEdge };
   });
 
   if (evOnly) rows = rows.filter(r => (r.kEdge != null && r.kEdge > 0) || (r.pEdge != null && r.pEdge > 0));
@@ -671,7 +685,7 @@ function renderTable() {
     const kelly = bestEdgeVal != null ? (halfKelly(r.prob, bestProb) * 100).toFixed(1) + '%' : '<span class="dash">—</span>';
 
     const kLink = r.kUrl ? `<a class="link-icon" href="${r.kUrl}" target="_blank" title="${r.kTitle}">K↗</a>` : '';
-    const pLink = r.pUrl ? `<a class="link-icon" href="${r.pUrl}" target="_blank">P↗</a>` : '';
+    const pLink = r.pUrl ? `<a class="link-icon" href="${r.pUrl}" target="_blank" title="${r.pTitle}">P↗</a>` : '';
     const links = (kLink || pLink) ? [kLink, pLink].filter(Boolean).join(' ') : '<span class="dash">—</span>';
 
     let pointStr = r.point ? ` <span style="color:var(--muted);font-size:11px">(${r.point})</span>` : '';
