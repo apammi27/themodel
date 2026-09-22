@@ -268,30 +268,13 @@ function saveKey() {
 
 async function kalshiFetch(urlStr) {
   const key = getKey();
-  const hdrs = { accept: 'application/json' };
-  if (key) hdrs['Authorization'] = `Bearer ${key}`;
-
-  // 1. Try direct (works if Kalshi sends CORS headers, guaranteed with auth)
-  try {
-    const r = await fetch(urlStr, { headers: hdrs });
-    if (r.ok) return r.json();
-    console.warn('Kalshi direct failed:', r.status);
-  } catch(e) { console.warn('Kalshi direct CORS blocked:', e.message); }
-
-  // 2. corsproxy.io — sends server-side request, CORS not an issue
-  try {
-    const r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(urlStr),
-      key ? { headers: { 'x-requested-with': urlStr, Authorization: `Bearer ${key}` } } : {});
-    if (r.ok) return r.json();
-  } catch(e) { console.warn('corsproxy failed:', e.message); }
-
-  // 3. allorigins.win
-  try {
-    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(urlStr));
-    if (r.ok) return r.json();
-  } catch(e) { console.warn('allorigins failed:', e.message); }
-
-  throw new Error('all fetch methods failed');
+  if (!key) throw new Error('NO_KEY');
+  const r = await fetch(urlStr, {
+    headers: { accept: 'application/json', Authorization: `Bearer ${key}` }
+  });
+  if (r.status === 401) throw new Error('BAD_KEY');
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
 async function fetchKalshiLive() {
@@ -317,35 +300,19 @@ async function loadKalshi() {
 
   try {
     const markets = await fetchKalshiLive();
-    if (markets.length > 0) {
-      kalshiMarkets = markets;
-      badge.textContent = `Kalshi: ${markets.length} markets · live ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
-      badge.className = 'odds-badge ok';
-      if (btn) btn.disabled = false;
-      if (csvRows.length) renderTable();
-      return;
-    }
+    kalshiMarkets = markets;
+    badge.textContent = `Kalshi: ${markets.length} markets · live ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    badge.className = 'odds-badge ok';
+    if (csvRows.length) renderTable();
   } catch (e) {
-    console.error('Kalshi live fetch failed:', e);
-  }
-
-  // Final fallback: pre-fetched cached JSON
-  try {
-    const r = await fetch('kalshi_markets.json');
-    const data = await r.json();
-    kalshiMarkets = data.markets ?? (Array.isArray(data) ? data : []);
-    const updated = data.updated ? new Date(data.updated) : null;
-    if (kalshiMarkets.length === 0) {
-      badge.textContent = 'Kalshi fetch failed — check console for details';
-      badge.className = 'odds-badge warn';
+    if (e.message === 'NO_KEY') {
+      badge.textContent = 'Kalshi: paste API key above → Save';
+    } else if (e.message === 'BAD_KEY') {
+      badge.textContent = 'Kalshi: invalid API key (401)';
     } else {
-      badge.textContent = `Kalshi: ${kalshiMarkets.length} markets (cached)`
-        + (updated ? ` · ${updated.toLocaleDateString()} ${updated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : '');
-      badge.className = 'odds-badge ok';
-      if (csvRows.length) renderTable();
+      badge.textContent = `Kalshi: fetch error — ${e.message}`;
+      console.error('Kalshi fetch failed:', e);
     }
-  } catch {
-    badge.textContent = 'Kalshi fetch failed — check connection';
     badge.className = 'odds-badge warn';
   }
   if (btn) btn.disabled = false;
