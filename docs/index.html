@@ -397,22 +397,53 @@ async function loadPolymarket() {
   const badge = document.getElementById('polyBadge');
   badge.textContent = 'Poly: loading…';
   badge.className = 'odds-badge warn';
+
   const allMarkets = [];
-  for (const tag of ['nfl', 'football']) {
+
+  // 1. Events endpoint — per-game matchups live here as nested markets
+  try {
+    const data = await polyFetch('https://gamma-api.polymarket.com/events?tag_slug=nfl&active=true&closed=false&limit=200');
+    const events = Array.isArray(data) ? data : (data.events ?? []);
+    for (const ev of events) {
+      const evMarkets = ev.markets ?? [];
+      // Embed event question into each sub-market so matching works
+      for (const m of evMarkets) {
+        if (!m.question) m.question = ev.title ?? ev.question ?? '';
+        allMarkets.push(m);
+      }
+      // Also push the event itself in case it has outcomePrices directly
+      if (!evMarkets.length && (ev.outcomePrices || ev.outcomes)) {
+        allMarkets.push(ev);
+      }
+    }
+    console.log('Poly events fetched:', events.length, '→', allMarkets.length, 'markets');
+  } catch(e) { console.warn('Poly events failed:', e.message); }
+
+  // 2. Markets endpoint with broader search terms
+  for (const q of ['NFL week', 'vs', 'NFL']) {
+    if (allMarkets.length >= 20) break;
     try {
-      const data = await polyFetch(`https://gamma-api.polymarket.com/markets?tag_slug=${tag}&active=true&closed=false&limit=200`);
+      const url = `https://gamma-api.polymarket.com/markets?q=${encodeURIComponent(q)}&active=true&closed=false&limit=100`;
+      const data = await polyFetch(url);
       const batch = Array.isArray(data) ? data : (data.markets ?? []);
       allMarkets.push(...batch);
-      if (allMarkets.length > 0) break;
-    } catch(e) { console.warn('Poly tag', tag, 'failed:', e.message); }
+    } catch(e) { console.warn('Poly search', q, 'failed:', e.message); }
   }
-  polyMarkets = allMarkets;
+
+  // Deduplicate by conditionId / id
+  const seen = new Set();
+  polyMarkets = allMarkets.filter(m => {
+    const key = m.conditionId ?? m.id ?? m.question;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+
   if (polyMarkets.length > 0) {
     badge.textContent = `Poly: ${polyMarkets.length} markets · live ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
     badge.className = 'odds-badge ok';
     if (csvRows.length) renderTable();
   } else {
-    badge.textContent = 'Poly: no NFL markets';
+    badge.textContent = 'Poly: no NFL markets found';
     badge.className = 'odds-badge warn';
   }
 }
