@@ -1,0 +1,76 @@
+name: Refresh Kalshi Odds
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Refresh every day at 14:00 UTC (10am ET) during NFL season
+    - cron: "0 14 * 9-12 *"
+    - cron: "0 14 * 1-2 *"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: Fetch Kalshi sports markets
+        env:
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+        run: |
+          python - <<'EOF'
+          import json, os, time, requests
+          from datetime import datetime, timezone
+
+          BASE = "https://trading-api.kalshi.com/trade-api/v2"
+          hdrs = {"accept": "application/json"}
+          api_key = os.environ.get("KALSHI_API_KEY", "")
+          if api_key:
+              hdrs["Authorization"] = f"Bearer {api_key}"
+
+          markets = []
+          cursor = None
+          for category in ("sports",):
+              cur = None
+              while True:
+                  params = {"status": "open", "category": category, "limit": 200}
+                  if cur:
+                      params["cursor"] = cur
+                  try:
+                      r = requests.get(f"{BASE}/markets", params=params, headers=hdrs, timeout=15)
+                      r.raise_for_status()
+                      data = r.json()
+                      batch = data.get("markets", [])
+                      markets.extend(batch)
+                      cur = data.get("cursor")
+                      if not cur or not batch:
+                          break
+                  except Exception as e:
+                      print(f"Kalshi fetch error: {e}")
+                      break
+
+          output = {
+              "markets": markets,
+              "updated": datetime.now(timezone.utc).isoformat(),
+              "count": len(markets),
+          }
+          with open("docs/kalshi_markets.json", "w") as f:
+              json.dump(output, f)
+          print(f"Wrote {len(markets)} markets to docs/kalshi_markets.json")
+          EOF
+
+      - name: Commit updated odds
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/kalshi_markets.json
+          git diff --cached --quiet || git commit -m "chore: refresh Kalshi odds [$(date -u +%Y-%m-%d %H:%M UTC)]"
+          git push || true

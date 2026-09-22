@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<title>8rain EV Checker</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>
+:root {
+  --bg:        #0c0e14;
+  --surface:   #13161f;
+  --surface2:  #1a1d28;
+  --border:    #252a38;
+  --text:      #dde3f0;
+  --muted:     #5a6480;
+  --accent:    #4f8ef7;
+  --green:     #22c55e;
+  --green-bg:  rgba(34,197,94,.08);
+  --red:       #f87171;
+  --red-bg:    rgba(248,113,113,.07);
+  --yellow:    #fbbf24;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font:14px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+body{padding:0 0 40px}
+
+/* ── header ── */
+header{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  padding:16px 24px;border-bottom:1px solid var(--border);
+  background:var(--surface);position:sticky;top:0;z-index:10;
+}
+.brand{font-size:15px;font-weight:700;letter-spacing:.05em;color:var(--text)}
+.brand span{color:var(--accent)}
+.odds-badge{
+  font-size:11px;padding:4px 10px;border-radius:20px;
+  background:var(--surface2);border:1px solid var(--border);color:var(--muted);
+}
+.odds-badge.ok{color:var(--green);border-color:rgba(34,197,94,.3)}
+.odds-badge.warn{color:var(--yellow);border-color:rgba(251,191,36,.3)}
+
+/* ── layout ── */
+main{max-width:1200px;margin:0 auto;padding:24px 20px}
+
+/* ── drop zone ── */
+#dropzone{
+  border:2px dashed var(--border);border-radius:10px;
+  padding:48px 24px;text-align:center;cursor:pointer;
+  transition:border-color .15s,background .15s;
+  background:var(--surface);margin-bottom:24px;
+}
+#dropzone:hover,#dropzone.drag{border-color:var(--accent);background:rgba(79,142,247,.04)}
+#dropzone input{display:none}
+#dropzone .icon{font-size:32px;margin-bottom:12px;opacity:.5}
+#dropzone p{color:var(--muted);font-size:13px;margin-top:6px}
+#dropzone strong{color:var(--text)}
+
+/* ── format hint ── */
+.format-hint{
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:14px 18px;margin-bottom:24px;font-size:12px;color:var(--muted);
+}
+.format-hint code{
+  display:block;margin-top:8px;padding:8px 12px;background:var(--bg);
+  border-radius:5px;font-family:monospace;color:var(--text);font-size:11px;
+  white-space:pre;overflow-x:auto;
+}
+
+/* ── controls ── */
+#controls{
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  margin-bottom:20px;padding:12px 16px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+}
+#controls label{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer}
+#controls input[type=checkbox]{accent-color:var(--accent)}
+#controls input[type=number]{
+  width:70px;padding:4px 8px;border-radius:5px;
+  background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:13px;
+}
+.ctrl-sep{width:1px;height:20px;background:var(--border)}
+#rowCount{margin-left:auto;font-size:12px;color:var(--muted)}
+#clearBtn{
+  padding:5px 12px;border-radius:5px;background:transparent;
+  border:1px solid var(--border);color:var(--muted);font-size:12px;cursor:pointer;
+}
+#clearBtn:hover{border-color:var(--red);color:var(--red)}
+
+/* ── table wrapper ── */
+#results{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{
+  padding:8px 12px;text-align:left;font-size:11px;font-weight:600;
+  letter-spacing:.06em;color:var(--muted);border-bottom:1px solid var(--border);
+  cursor:pointer;user-select:none;white-space:nowrap;
+}
+thead th:hover{color:var(--text)}
+thead th.sort-asc::after{content:" ↑"}
+thead th.sort-desc::after{content:" ↓"}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+tbody tr:hover{background:var(--surface2)}
+tbody td{padding:9px 12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+tbody tr.ev-pos td:first-child{border-left:3px solid var(--green)}
+tbody tr.ev-neg td:first-child{border-left:3px solid transparent}
+
+.tag{
+  display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;
+  font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+}
+.tag-h2h{background:rgba(79,142,247,.15);color:#7aaef8}
+.tag-spread{background:rgba(251,191,36,.12);color:#fbbf24}
+.tag-total{background:rgba(168,85,247,.12);color:#c084fc}
+
+.prob{font-weight:600}
+.edge-pos{color:var(--green);font-weight:700}
+.edge-neg{color:var(--muted)}
+.edge-strong{color:#4ade80;font-weight:700}
+.dash{color:var(--border)}
+.link-icon{color:var(--accent);text-decoration:none;font-size:12px}
+.link-icon:hover{text-decoration:underline}
+
+/* ── empty state ── */
+.empty{
+  text-align:center;padding:60px 24px;color:var(--muted);font-size:13px;
+}
+.empty p{margin-top:8px;font-size:12px}
+</style>
+
+<header>
+  <div class="brand">8rain Station<span>®</span> EV Checker</div>
+  <div class="odds-badge warn" id="oddsBadge">Kalshi odds not loaded</div>
+</header>
+
+<main>
+  <div class="format-hint">
+    <strong style="color:var(--text)">Expected CSV format</strong> — columns (header row required):
+    <code>LEAGUE,DATE,HOME,AWAY,MARKET,SIDE,POINT,MODEL_PROB
+NFL,20260927,KC,BUF,h2h,home,,0.62
+NFL,20260927,KC,BUF,h2h,away,,0.38
+NFL,20260927,KC,BUF,spread,home,-3.5,0.52
+NFL,20260927,KC,BUF,total,over,47.5,0.55</code>
+    Also accepts the existing model output format with <code>WIN %</code> column.
+  </div>
+
+  <div id="dropzone" onclick="document.getElementById('fileInput').click()">
+    <div class="icon">📄</div>
+    <strong>Drop model CSV here</strong>
+    <p>or click to browse</p>
+    <input type="file" id="fileInput" accept=".csv,.txt">
+  </div>
+
+  <div id="controls" hidden>
+    <label><input type="checkbox" id="evOnly"> +EV rows only</label>
+    <div class="ctrl-sep"></div>
+    <label>Min edge: <input type="number" id="minEdge" value="0" step="0.5" min="0"> %</label>
+    <div class="ctrl-sep"></div>
+    <label>
+      Sort by:
+      <select id="sortSel" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:5px;font-size:13px">
+        <option value="edge">K Edge ↓</option>
+        <option value="model">Model % ↓</option>
+        <option value="game">Game</option>
+      </select>
+    </label>
+    <span id="rowCount"></span>
+    <button id="clearBtn" onclick="clearFile()">✕ Clear</button>
+  </div>
+
+  <div id="results"></div>
+</main>
+
+<script>
+// ── Team aliases ────────────────────────────────────────────────────────────
+const ALIASES = {
+  nfl: {
+    ARI:["Arizona Cardinals","Cardinals"], ATL:["Atlanta Falcons","Falcons"],
+    BAL:["Baltimore Ravens","Ravens"],     BUF:["Buffalo Bills","Bills"],
+    CAR:["Carolina Panthers","Panthers"],  CHI:["Chicago Bears","Bears"],
+    CIN:["Cincinnati Bengals","Bengals"],  CLE:["Cleveland Browns","Browns"],
+    DAL:["Dallas Cowboys","Cowboys"],      DEN:["Denver Broncos","Broncos"],
+    DET:["Detroit Lions","Lions"],         GB:["Green Bay Packers","Packers"],
+    HOU:["Houston Texans","Texans"],       IND:["Indianapolis Colts","Colts"],
+    JAX:["Jacksonville Jaguars","Jaguars"],KC:["Kansas City Chiefs","Chiefs"],
+    LAC:["Los Angeles Chargers","LA Chargers","Chargers"],
+    LAR:["Los Angeles Rams","LA Rams","Rams"],
+    LV:["Las Vegas Raiders","Raiders"],   MIA:["Miami Dolphins","Dolphins"],
+    MIN:["Minnesota Vikings","Vikings"],   NE:["New England Patriots","Patriots"],
+    NO:["New Orleans Saints","Saints"],   NYG:["New York Giants","Giants"],
+    NYJ:["New York Jets","Jets"],         PHI:["Philadelphia Eagles","Eagles"],
+    PIT:["Pittsburgh Steelers","Steelers"],SEA:["Seattle Seahawks","Seahawks"],
+    SF:["San Francisco 49ers","49ers"],   TB:["Tampa Bay Buccaneers","Buccaneers","Bucs"],
+    TEN:["Tennessee Titans","Titans"],    WAS:["Washington Commanders","Commanders"],
+  },
+  nba: {
+    ATL:["Atlanta Hawks","Hawks"],         BOS:["Boston Celtics","Celtics"],
+    BKN:["Brooklyn Nets","Nets"],          CHA:["Charlotte Hornets","Hornets"],
+    CHI:["Chicago Bulls","Bulls"],         CLE:["Cleveland Cavaliers","Cavaliers","Cavs"],
+    DAL:["Dallas Mavericks","Mavericks","Mavs"], DEN:["Denver Nuggets","Nuggets"],
+    DET:["Detroit Pistons","Pistons"],     GSW:["Golden State Warriors","Warriors"],
+    HOU:["Houston Rockets","Rockets"],     IND:["Indiana Pacers","Pacers"],
+    LAC:["Los Angeles Clippers","LA Clippers","Clippers"],
+    LAL:["Los Angeles Lakers","LA Lakers","Lakers"],
+    MEM:["Memphis Grizzlies","Grizzlies"], MIA:["Miami Heat","Heat"],
+    MIL:["Milwaukee Bucks","Bucks"],       MIN:["Minnesota Timberwolves","Timberwolves","Wolves"],
+    NOP:["New Orleans Pelicans","Pelicans"],NYK:["New York Knicks","Knicks"],
+    OKC:["Oklahoma City Thunder","Thunder"],ORL:["Orlando Magic","Magic"],
+    PHI:["Philadelphia 76ers","76ers","Sixers"],PHO:["Phoenix Suns","Suns"],
+    POR:["Portland Trail Blazers","Trail Blazers","Blazers"],
+    SAC:["Sacramento Kings","Kings"],      SAS:["San Antonio Spurs","Spurs"],
+    TOR:["Toronto Raptors","Raptors"],     UTA:["Utah Jazz","Jazz"],
+    WAS:["Washington Wizards","Wizards"],
+  },
+  mlb: {
+    AZ:["Arizona Diamondbacks","Diamondbacks","D-backs"],
+    ATL:["Atlanta Braves","Braves"],       BAL:["Baltimore Orioles","Orioles"],
+    BOS:["Boston Red Sox","Red Sox"],      CHC:["Chicago Cubs","Cubs"],
+    CWS:["Chicago White Sox","White Sox"], CIN:["Cincinnati Reds","Reds"],
+    CLE:["Cleveland Guardians","Guardians"],COL:["Colorado Rockies","Rockies"],
+    DET:["Detroit Tigers","Tigers"],       HOU:["Houston Astros","Astros"],
+    KC:["Kansas City Royals","Royals"],    LAA:["Los Angeles Angels","Angels"],
+    LAD:["Los Angeles Dodgers","Dodgers"], MIA:["Miami Marlins","Marlins"],
+    MIL:["Milwaukee Brewers","Brewers"],   MIN:["Minnesota Twins","Twins"],
+    NYM:["New York Mets","Mets"],          NYY:["New York Yankees","Yankees"],
+    ATH:["Oakland Athletics","Athletics","A's"],
+    PHI:["Philadelphia Phillies","Phillies"],PIT:["Pittsburgh Pirates","Pirates"],
+    SD:["San Diego Padres","Padres"],      SF:["San Francisco Giants","Giants"],
+    SEA:["Seattle Mariners","Mariners"],   STL:["St. Louis Cardinals","Cardinals"],
+    TB:["Tampa Bay Rays","Rays"],          TEX:["Texas Rangers","Rangers"],
+    TOR:["Toronto Blue Jays","Blue Jays"], WSH:["Washington Nationals","Nationals"],
+  },
+};
+
+function getAliases(league, code) {
+  return ALIASES[league.toLowerCase()]?.[code.toUpperCase()] ?? [code];
+}
+function teamInText(league, code, text) {
+  const t = text.toLowerCase();
+  return getAliases(league, code).some(a => t.includes(a.toLowerCase()));
+}
+
+// ── Kalshi state ─────────────────────────────────────────────────────────────
+let kalshiMarkets = [];
+let csvRows = [];
+
+async function loadKalshi() {
+  const badge = document.getElementById('oddsBadge');
+  try {
+    const r = await fetch('kalshi_markets.json');
+    const data = await r.json();
+    kalshiMarkets = data.markets ?? (Array.isArray(data) ? data : []);
+    const updated = data.updated ? new Date(data.updated) : null;
+    if (kalshiMarkets.length === 0) {
+      badge.textContent = 'Kalshi odds not fetched — run Refresh Odds workflow';
+      badge.className = 'odds-badge warn';
+    } else {
+      badge.textContent = `Kalshi: ${kalshiMarkets.length} markets`
+        + (updated ? ` · ${updated.toLocaleDateString()} ${updated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : '');
+      badge.className = 'odds-badge ok';
+    }
+  } catch {
+    badge.textContent = 'Kalshi odds not fetched — run Refresh Odds workflow';
+    badge.className = 'odds-badge warn';
+  }
+}
+
+// ── Kalshi matching ───────────────────────────────────────────────────────────
+function matchKalshi(league, home, away) {
+  for (const m of kalshiMarkets) {
+    const title = (m.title ?? '') + ' ' + (m.subtitle ?? '');
+    if (teamInText(league, home, title) && teamInText(league, away, title)) {
+      return m;
+    }
+  }
+  return null;
+}
+
+function kalshiHomeProbability(league, home, away, market) {
+  const yesAsk = market.yes_ask;
+  if (yesAsk == null) return null;
+  const title = ((market.title ?? '') + ' ' + (market.subtitle ?? '')).toLowerCase();
+  const homeAliases = getAliases(league, home);
+  const awayAliases = getAliases(league, away);
+  const homePos = Math.min(...homeAliases.map(a => { const i = title.indexOf(a.toLowerCase()); return i >= 0 ? i : 9999; }));
+  const awayPos = Math.min(...awayAliases.map(a => { const i = title.indexOf(a.toLowerCase()); return i >= 0 ? i : 9999; }));
+  const yesProb = yesAsk / 100;
+  return homePos <= awayPos ? yesProb : 1 - yesProb;
+}
+
+// ── CSV parsing ───────────────────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().toUpperCase().replace(/\s+/g,'_'));
+
+  // Detect format
+  const isLegacy = headers.includes('WIN_%') || headers.includes('WIN_%');
+  const winCol = headers.indexOf('WIN_%') >= 0 ? 'WIN_%' : headers.indexOf('WIN_%');
+  const winIdx = headers.findIndex(h => h === 'WIN_%' || h === 'WIN%' || h.replace(/[^A-Z%]/g,'') === 'WIN%');
+  const probIdx = headers.indexOf('MODEL_PROB') >= 0 ? headers.indexOf('MODEL_PROB') : winIdx;
+
+  const idx = {
+    league: headers.indexOf('LEAGUE'),
+    date:   headers.indexOf('DATE'),
+    home:   headers.indexOf('HOME'),
+    away:   headers.indexOf('AWAY'),
+    market: headers.indexOf('MARKET'),
+    side:   headers.indexOf('SIDE'),
+    point:  headers.indexOf('POINT'),
+    prob:   probIdx,
+    section:headers.indexOf('SECTION'),
+    selector:headers.indexOf('SELECTOR'),
+  };
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim());
+    const league  = idx.league  >= 0 ? (cols[idx.league]  ?? '').toLowerCase() : '';
+    const date    = idx.date    >= 0 ? (cols[idx.date]    ?? '') : '';
+    const home    = idx.home    >= 0 ? (cols[idx.home]    ?? '').toUpperCase() : '';
+    const away    = idx.away    >= 0 ? (cols[idx.away]    ?? '').toUpperCase() : '';
+    const market  = idx.market  >= 0 ? (cols[idx.market]  ?? '').toLowerCase() : '';
+    const side    = idx.side    >= 0 ? (cols[idx.side]    ?? '').toLowerCase() : '';
+    const point   = idx.point   >= 0 ? (cols[idx.point]   ?? '') : '';
+    const probRaw = idx.prob    >= 0 ? parseFloat(cols[idx.prob] ?? '') : NaN;
+    if (!league || !home || !away || isNaN(probRaw)) continue;
+    const prob = probRaw > 1 ? probRaw / 100 : probRaw;
+    rows.push({ league, date, home, away, market, side, point, prob });
+  }
+  return rows;
+}
+
+// ── EV / Kelly ────────────────────────────────────────────────────────────────
+function halfKelly(modelProb, marketProb) {
+  if (!marketProb || marketProb <= 0 || marketProb >= 1) return 0;
+  const b = (1 / marketProb) - 1;
+  const p = modelProb;
+  const q = 1 - p;
+  return Math.max(0, ((b * p - q) / b) / 2);
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function fmtPct(v) {
+  if (v == null || isNaN(v)) return '<span class="dash">—</span>';
+  return (v * 100).toFixed(1) + '%';
+}
+function fmtDate(d) {
+  if (!d || d.length !== 8) return d;
+  const y = d.slice(0,4), m = d.slice(4,6), day = d.slice(6,8);
+  const dt = new Date(`${y}-${m}-${day}`);
+  return dt.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+}
+function teamLabel(league, code) {
+  const aliases = getAliases(league, code);
+  return aliases[1] ?? aliases[0] ?? code;  // prefer short name (index 1)
+}
+function marketTag(market) {
+  const cls = market === 'h2h' ? 'tag-h2h' : market === 'spread' ? 'tag-spread' : 'tag-total';
+  return `<span class="tag ${cls}">${market}</span>`;
+}
+
+function renderTable() {
+  const evOnly = document.getElementById('evOnly').checked;
+  const minEdge = parseFloat(document.getElementById('minEdge').value || '0') / 100;
+  const sortBy = document.getElementById('sortSel').value;
+
+  let rows = csvRows.map(r => {
+    const km = matchKalshi(r.league, r.home, r.away);
+    let kProb = null, kEdge = null, kUrl = null, kTitle = null;
+    if (km) {
+      const hp = kalshiHomeProbability(r.league, r.home, r.away, km);
+      if (hp != null) {
+        const isHomeSide = r.side === 'home' || r.side === r.home.toLowerCase();
+        kProb  = isHomeSide ? hp : 1 - hp;
+        kEdge  = r.prob - kProb;
+        kUrl   = `https://kalshi.com/markets/${km.ticker ?? ''}`;
+        kTitle = (km.title ?? '').trim();
+      }
+    }
+    return { ...r, kProb, kEdge, kUrl, kTitle };
+  });
+
+  if (evOnly) rows = rows.filter(r => r.kEdge != null && r.kEdge > 0);
+  if (minEdge > 0) rows = rows.filter(r => r.kEdge != null && r.kEdge >= minEdge);
+
+  if (sortBy === 'edge') {
+    rows.sort((a, b) => (b.kEdge ?? -99) - (a.kEdge ?? -99));
+  } else if (sortBy === 'model') {
+    rows.sort((a, b) => b.prob - a.prob);
+  } else {
+    rows.sort((a, b) => a.date.localeCompare(b.date) || a.home.localeCompare(b.home));
+  }
+
+  document.getElementById('rowCount').textContent = `${rows.length} rows`;
+
+  if (rows.length === 0) {
+    document.getElementById('results').innerHTML =
+      '<div class="empty"><strong>No rows match filters</strong><p>Try removing EV filter or lowering min edge.</p></div>';
+    return;
+  }
+
+  const th = (label, tip='') => `<th title="${tip}">${label}</th>`;
+  let html = `<table>
+<thead><tr>
+  ${th('DATE')}${th('MATCHUP')}${th('MARKET')}${th('SIDE')}${th('MODEL %','Your model win probability')}
+  ${th('KALSHI %','Kalshi implied probability (yes_ask/100)')}
+  ${th('K EDGE','Model% − Kalshi% (positive = model sees value)')}
+  ${th('½ KELLY','Suggested bet size (half-Kelly criterion)')}
+  ${th('LINK')}
+</tr></thead><tbody>`;
+
+  for (const r of rows) {
+    const ev = r.kEdge != null && r.kEdge > 0;
+    const rowCls = ev ? 'ev-pos' : 'ev-neg';
+    const sideLabel = r.side === 'home' ? teamLabel(r.league, r.home)
+                    : r.side === 'away' ? teamLabel(r.league, r.away)
+                    : r.side.charAt(0).toUpperCase() + r.side.slice(1);
+    const matchup = `${teamLabel(r.league, r.home)} <span style="color:var(--muted)">vs</span> ${teamLabel(r.league, r.away)}`;
+    const edgeCls = r.kEdge == null ? 'dash'
+                  : r.kEdge > 0.05  ? 'edge-strong'
+                  : r.kEdge > 0     ? 'edge-pos'
+                  : 'edge-neg';
+    const edgeTxt = r.kEdge != null
+      ? `<span class="${edgeCls}">${r.kEdge > 0 ? '+' : ''}${(r.kEdge * 100).toFixed(1)}%</span>`
+      : '<span class="dash">—</span>';
+    const kelly = r.kEdge != null && r.kEdge > 0 ? (halfKelly(r.prob, r.kProb) * 100).toFixed(1) + '%' : '<span class="dash">—</span>';
+    const link = r.kUrl ? `<a class="link-icon" href="${r.kUrl}" target="_blank" title="${r.kTitle}">↗</a>` : '<span class="dash">—</span>';
+
+    let pointStr = r.point ? ` <span style="color:var(--muted);font-size:11px">(${r.point})</span>` : '';
+
+    html += `<tr class="${rowCls}">
+  <td style="color:var(--muted)">${fmtDate(r.date)}</td>
+  <td>${matchup}</td>
+  <td>${marketTag(r.market)}${pointStr}</td>
+  <td><strong>${sideLabel}</strong></td>
+  <td class="prob">${fmtPct(r.prob)}</td>
+  <td>${fmtPct(r.kProb)}</td>
+  <td>${edgeTxt}</td>
+  <td>${kelly}</td>
+  <td>${link}</td>
+</tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('results').innerHTML = html;
+}
+
+// ── File handling ─────────────────────────────────────────────────────────────
+function handleFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    csvRows = parseCSV(e.target.result);
+    if (csvRows.length === 0) {
+      alert('Could not parse CSV. Check column headers match the expected format.');
+      return;
+    }
+    document.getElementById('dropzone').hidden = true;
+    document.getElementById('controls').hidden = false;
+    renderTable();
+  };
+  reader.readAsText(file);
+}
+
+function clearFile() {
+  csvRows = [];
+  document.getElementById('dropzone').hidden = false;
+  document.getElementById('controls').hidden = true;
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('fileInput').value = '';
+}
+
+// ── Event wiring ──────────────────────────────────────────────────────────────
+const dz = document.getElementById('dropzone');
+document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('drag');
+  handleFile(e.dataTransfer.files[0]);
+});
+document.getElementById('evOnly').addEventListener('change', renderTable);
+document.getElementById('minEdge').addEventListener('input', renderTable);
+document.getElementById('sortSel').addEventListener('change', renderTable);
+
+loadKalshi();
+</script>
+</html>
