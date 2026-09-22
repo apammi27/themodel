@@ -212,5 +212,22 @@ def regress(sports, ratings):
     ratings_store.save(store, ratings)
 
 
+@cli.command()
+@click.option("--port", default=5000, type=int, help="Port to listen on")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--output", default=DEFAULT_OUTPUT, help="Model output directory to read CSVs from")
+@click.option("--kalshi-key", default=None, envvar="KALSHI_API_KEY",
+              help="Kalshi API key (optional; public market data works without one)")
+def web(port, host, output, kalshi_key):
+    """Start the edge-calculator web UI (reads model output + live Kalshi/Polymarket odds)."""
+    from web.server import create_app
+    app = create_app(output_dir=output, kalshi_api_key=kalshi_key)
+    url = f"http://{host}:{port}"
+    click.echo(f"\n  8rain Weightings running at  {url}\n")
+    click.echo("  → Run the model first:  python main.py run")
+    click.echo("  → Then open the URL above to see predictions + live market odds.\n")
+    app.run(host=host, port=port, debug=False)
+
+
 if __name__ == "__main__":
     cli()

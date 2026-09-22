@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>8rain Weightings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg:#080c17; --surface:#0f1626; --surface-2:#141d33; --border:#1e2d4a;
+  --text:#e8edf7; --text-2:#7a8aab;
+  --accent:#f59e0b; --accent-soft:#2a1f06;
+  --pos:#10b981; --pos-soft:#052e1a;
+  --neg:#f87171; --neg-soft:#2a0a0a;
+  --neutral:#5a6a8a; --neutral-soft:#141d33;
+  --chip-bg:#1e2d4a; --chip-active:#f59e0b; --chip-active-text:#080c17;
+  --mono:'JetBrains Mono',monospace; --sans:'Inter',system-ui,sans-serif;
+  --shadow:0 1px 4px rgba(0,0,0,.5); --shadow-md:0 4px 16px rgba(0,0,0,.6);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;
+  padding-inline:16px;padding-block:env(safe-area-inset-top,0px) env(safe-area-inset-bottom,0px)}
+
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding-block:14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.wordmark{font-family:var(--mono);font-weight:600;font-size:15px;letter-spacing:.02em;color:var(--accent)}
+.wordmark span{color:var(--text-2);font-weight:400}
+.header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--neutral);flex-shrink:0;transition:background .3s}
+.status-dot.live{background:var(--pos)}
+.status-dot.error{background:var(--neg)}
+.status-text{font-size:12px;color:var(--text-2)}
+.btn{font-family:var(--sans);font-size:12px;font-weight:500;padding:5px 12px;border-radius:6px;
+  border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;
+  transition:background .15s;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:var(--chip-active-text)}
+.btn-accent:hover{opacity:.9;background:var(--accent)}
+
+.stats-bar{display:flex;gap:10px;padding-block:12px;flex-wrap:wrap}
+.stat-tile{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:9px 14px;display:flex;flex-direction:column;gap:2px;min-width:90px;box-shadow:var(--shadow)}
+.stat-label{font-size:11px;color:var(--text-2);font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+.stat-value{font-family:var(--mono);font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat-value.pos{color:var(--pos)} .stat-value.accent{color:var(--accent)}
+
+.toolbar{display:flex;align-items:center;gap:10px;padding-block:8px;flex-wrap:wrap}
+.chip-row{display:flex;gap:4px;flex-wrap:wrap}
+.chip{font-size:12px;font-weight:500;padding:4px 10px;border-radius:20px;
+  background:var(--chip-bg);color:var(--text-2);cursor:pointer;border:none;
+  transition:background .12s,color .12s;white-space:nowrap}
+.chip.active,.chip:hover{background:var(--chip-active);color:var(--chip-active-text)}
+.sep{width:1px;height:20px;background:var(--border);flex-shrink:0}
+.toggle-label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;
+  color:var(--text-2);cursor:pointer;user-select:none}
+.toggle-label input{display:none}
+.toggle-track{width:32px;height:18px;border-radius:9px;background:var(--border);
+  position:relative;transition:background .15s;flex-shrink:0}
+.toggle-track::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;
+  border-radius:50%;background:#fff;transition:transform .15s}
+input:checked+.toggle-track{background:var(--pos)}
+input:checked+.toggle-track::after{transform:translateX(14px)}
+.toolbar-right{margin-left:auto;display:flex;gap:6px}
+.search-wrap{position:relative}
+.search-wrap input{font-family:var(--sans);font-size:13px;padding:5px 10px 5px 28px;
+  border-radius:6px;border:1px solid var(--border);background:var(--surface);
+  color:var(--text);width:180px;outline:none}
+.search-wrap input:focus{border-color:var(--accent)}
+.search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);
+  color:var(--text-2);pointer-events:none;font-size:13px}
+
+.notice{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:14px 18px;font-size:13px;color:var(--text-2);margin-block:8px}
+.notice strong{color:var(--text)}
+.notice a{color:var(--accent);text-decoration:none}
+
+.table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border);
+  box-shadow:var(--shadow);margin-bottom:24px}
+table{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface)}
+thead th{font-family:var(--sans);font-size:11px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-2);padding:8px 11px;
+  background:var(--surface-2);border-bottom:1px solid var(--border);
+  white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;z-index:1}
+thead th:hover{color:var(--text)}
+thead th.sort-asc::after{content:' ↑'} thead th.sort-desc::after{content:' ↓'}
+thead th.platform-k{border-left:2px solid #3b82f6}
+thead th.platform-p{border-left:2px solid #8b5cf6}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:var(--surface-2)}
+td{padding:7px 11px;white-space:nowrap;vertical-align:middle}
+td.platform-k{border-left:2px solid rgba(59,130,246,.25)}
+td.platform-p{border-left:2px solid rgba(139,92,246,.25)}
+.td-mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.badge{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.05em;
+  padding:2px 6px;border-radius:4px;text-transform:uppercase}
+.badge-nba{background:#172554;color:#93c5fd} .badge-nfl{background:#1c2038;color:#a5b4fc}
+.badge-mlb{background:#1e1010;color:#fca5a5} .badge-wnba{background:#1e1208;color:#fbbf24}
+.badge-epl{background:#0d2010;color:#6ee7b7} .badge-league{background:var(--neutral-soft);color:var(--neutral)}
+.badge-market{background:var(--chip-bg);color:var(--text-2)}
+
+.side-home{color:var(--accent);font-weight:600} .side-away{color:var(--text-2)}
+.side-over{color:var(--pos);font-weight:600} .side-under{color:var(--neg)}
+.side-yes{color:var(--pos);font-weight:600} .side-no{color:var(--neg)}
+
+.platform-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;
+  font-weight:600;padding:2px 7px;border-radius:4px;text-decoration:none}
+.pb-k{background:rgba(59,130,246,.15);color:#60a5fa}
+.pb-p{background:rgba(139,92,246,.15);color:#a78bfa}
+
+.edge-badge{display:inline-block;font-family:var(--mono);font-size:12px;font-weight:600;
+  padding:2px 8px;border-radius:5px;min-width:58px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.edge-pos{background:var(--pos-soft);color:var(--pos)}
+.edge-neg{background:var(--neg-soft);color:var(--neg)}
+.edge-nil{background:var(--neutral-soft);color:var(--neutral)}
+.kelly-val{font-family:var(--mono);font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.kelly-pos{color:var(--pos);font-weight:600}
+.prob-val{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+.no-match{color:var(--neutral);font-size:11px}
+
+.empty-state{padding:48px 20px;text-align:center;color:var(--text-2);font-size:13px}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.legend{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+  padding-block:6px;font-size:12px;color:var(--text-2)}
+.legend-item{display:flex;align-items:center;gap:5px}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="app-header">
+  <div class="wordmark">8rain<span>®</span> Weightings</div>
+  <div class="header-right">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">Loading…</span>
+    <button class="btn" onclick="refresh()">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-tile"><div class="stat-label">Predictions</div><div class="stat-value" id="statTotal">—</div></div>
+  <div class="stat-tile"><div class="stat-label">K +EV</div><div class="stat-value pos" id="statKEV">—</div></div>
+  <div class="stat-tile"><div class="stat-label">P +EV</div><div class="stat-value pos" id="statPEV">—</div></div>
+  <div class="stat-tile"><div class="stat-label">Best K Edge</div><div class="stat-value accent" id="statKBest">—</div></div>
+  <div class="stat-tile"><div class="stat-label">Best P Edge</div><div class="stat-value accent" id="statPBest">—</div></div>
+  <div class="stat-tile"><div class="stat-label">K Matched</div><div class="stat-value" id="statKMatch">—</div></div>
+  <div class="stat-tile"><div class="stat-label">P Matched</div><div class="stat-value" id="statPMatch">—</div></div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <div class="chip-row" id="leagueChips">
+    <button class="chip active" data-league="all">All</button>
+    <button class="chip" data-league="nba">NBA</button>
+    <button class="chip" data-league="nfl">NFL</button>
+    <button class="chip" data-league="mlb">MLB</button>
+    <button class="chip" data-league="wnba">WNBA</button>
+    <button class="chip" data-league="epl">EPL</button>
+  </div>
+  <div class="sep"></div>
+  <div class="chip-row" id="marketChips">
+    <button class="chip active" data-market="all">All</button>
+    <button class="chip" data-market="h2h">ML</button>
+    <button class="chip" data-market="spread">Spread</button>
+    <button class="chip" data-market="total">Total</button>
+    <button class="chip" data-market="team_prop">Team</button>
+  </div>
+  <div class="sep"></div>
+  <label class="toggle-label">
+    <input type="checkbox" id="evOnly" onchange="render()">
+    <span class="toggle-track"></span>
+    +EV Only
+  </label>
+  <label class="toggle-label">
+    <input type="checkbox" id="matchedOnly" checked onchange="render()">
+    <span class="toggle-track"></span>
+    Matched Only
+  </label>
+  <div class="toolbar-right">
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input type="text" id="searchBox" placeholder="Search team, market…" oninput="render()">
+    </div>
+  </div>
+</div>
+
+<!-- NO-PREDICTIONS NOTICE -->
+<div class="notice" id="noPredNotice" hidden>
+  <strong>No predictions loaded.</strong> Run the model first:
+  <code style="font-family:var(--mono);font-size:12px;color:var(--accent)">python main.py run</code>
+  — or use <code style="font-family:var(--mono);font-size:12px;color:var(--accent)">python main.py run --demo</code> to test with sample data.
+  This page auto-refreshes every 5 minutes.
+</div>
+
+<!-- LEGEND -->
+<div class="legend" id="legendBar" hidden>
+  <span class="legend-item">
+    <span class="platform-badge pb-k">K</span> Kalshi
+  </span>
+  <span class="legend-item">
+    <span class="platform-badge pb-p">P</span> Polymarket
+  </span>
+  <span class="legend-item" style="color:var(--pos)">■</span> +EV (edge &gt; 0)
+  <span class="legend-item" style="color:var(--neg)">■</span> –EV
+  <span class="legend-item" style="color:var(--neutral)">—</span> No market found
+  <span style="margin-left:auto;font-size:11px">Auto-refreshes every 5 min</span>
+</div>
+
+<!-- TABLE -->
+<div class="table-wrap" id="tableWrap" hidden>
+  <table>
+    <thead>
+      <tr>
+        <th onclick="sortBy('league')">League</th>
+        <th onclick="sortBy('game')">Game</th>
+        <th onclick="sortBy('market')">Market</th>
+        <th onclick="sortBy('side')">Side</th>
+        <th onclick="sortBy('point')">Line</th>
+        <th onclick="sortBy('win_pct')">Model %</th>
+        <th class="platform-k" onclick="sortBy('k_prob')">Kalshi %</th>
+        <th class="platform-k" onclick="sortBy('k_edge')">K Edge</th>
+        <th class="platform-k" onclick="sortBy('k_kelly')">K ½K</th>
+        <th class="platform-p" onclick="sortBy('p_prob')">Poly %</th>
+        <th class="platform-p" onclick="sortBy('p_edge')">P Edge</th>
+        <th class="platform-p" onclick="sortBy('p_kelly')">P ½K</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<script>
+// ── STATE ───────────────────────────────────────────────────────────────────
+let ROWS = [];
+let KALSHI = {};    // game_key → {home_prob, away_prob, url, title, matched}
+let POLY = {};      // game_key → {home_prob, away_prob, url, title, matched}
+let sortCol = 'k_edge';
+let sortDir = -1;
+let filterLeague = 'all';
+let filterMarket = 'all';
+let refreshTimer = null;
+
+// ── MATH ────────────────────────────────────────────────────────────────────
+function calcEdge(modelP, mktP) {
+  if (mktP === null || mktP === undefined) return null;
+  return modelP - mktP;
+}
+
+function calcHalfKelly(modelP, impliedP) {
+  if (impliedP === null || impliedP === undefined || impliedP <= 0 || impliedP >= 1) return null;
+  const decOdds = 1 / impliedP;
+  const b = decOdds - 1;
+  const f = (b * modelP - (1 - modelP)) / b;
+  return f > 0 ? f / 2 : null;
+}
+
+function gameKey(r) {
+  return `${r.league.toUpperCase()}|${r.date}|${r.home}|${r.away}`;
+}
+
+function getMarketProb(oddsMap, r) {
+  const gk = gameKey(r);
+  const m = oddsMap[gk];
+  if (!m || !m.matched) return null;
+  return r.side === 'home' ? m.home_prob : r.side === 'away' ? m.away_prob : null;
+}
+
+// ── FETCH ────────────────────────────────────────────────────────────────────
+async function fetchData() {
+  setStatus('loading');
+  try {
+    const [predResp, mktsResp] = await Promise.all([
+      fetch('/api/predictions'),
+      fetch('/api/markets'),
+    ]);
+    if (!predResp.ok || !mktsResp.ok) throw new Error('API error');
+    const predData = await predResp.json();
+    const mktsData = await mktsResp.json();
+
+    ROWS = predData.rows || [];
+    KALSHI = mktsData.kalshi || {};
+    POLY = mktsData.polymarket || {};
+
+    setStatus('live');
+    render();
+  } catch (e) {
+    setStatus('error', e.message);
+    console.error(e);
+  }
+}
+
+function setStatus(state, msg) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  dot.className = 'status-dot';
+  if (state === 'live') {
+    dot.classList.add('live');
+    txt.textContent = 'Live — ' + new Date().toLocaleTimeString();
+  } else if (state === 'loading') {
+    txt.innerHTML = '<span class="spinner"></span> Loading…';
+  } else if (state === 'error') {
+    dot.classList.add('error');
+    txt.textContent = 'Error: ' + (msg || 'fetch failed');
+  }
+}
+
+function refresh() {
+  clearTimeout(refreshTimer);
+  fetchData().finally(() => {
+    refreshTimer = setTimeout(refresh, 5 * 60 * 1000);
+  });
+}
+
+// ── RENDER ──────────────────────────────────────────────────────────────────
+function marketLabel(market, section) {
+  if (section === 'player_prop') return 'Prop';
+  return {h2h:'ML', spread:'Spread', total:'Total', team_prop:'Team', runs:'Runs', points:'Pts'}[market] || market;
+}
+
+function leagueCls(l) {
+  return {nba:'badge-nba',nfl:'badge-nfl',mlb:'badge-mlb',wnba:'badge-wnba',epl:'badge-epl'}[l] || 'badge-league';
+}
+
+function sideCls(s) {
+  return {home:'side-home',away:'side-away',over:'side-over',under:'side-under',yes:'side-yes',no:'side-no'}[s] || '';
+}
+
+function fmtPct(p) { return p !== null && p !== undefined ? (p * 100).toFixed(1) + '%' : null; }
+
+function edgeHTML(edge) {
+  if (edge === null) return '<span class="no-match">—</span>';
+  const s = edge >= 0 ? '+' : '';
+  const cls = edge > 0.001 ? 'edge-pos' : edge < -0.001 ? 'edge-neg' : 'edge-nil';
+  return `<span class="edge-badge ${cls}">${s}${(edge*100).toFixed(1)}%</span>`;
+}
+
+function kellyHTML(k) {
+  if (k === null) return '<span class="kelly-val">—</span>';
+  return `<span class="${k > 0 ? 'kelly-pos' : 'kelly-val'}">${(k*100).toFixed(1)}%</span>`;
+}
+
+function probCell(prob, url, platform) {
+  if (prob === null) return '<span class="no-match">—</span>';
+  const cls = platform === 'k' ? 'pb-k' : 'pb-p';
+  const link = url ? `<a href="${url}" target="_blank" class="platform-badge ${cls}">
+    ${platform.toUpperCase()}</a> ` : '';
+  return `${link}<span class="prob-val">${fmtPct(prob)}</span>`;
+}
+
+function getFilteredSorted() {
+  const q = (document.getElementById('searchBox').value || '').toLowerCase();
+  const evOnly = document.getElementById('evOnly').checked;
+  const matchedOnly = document.getElementById('matchedOnly').checked;
+
+  let rows = ROWS.filter(r => {
+    if (filterLeague !== 'all' && r.league !== filterLeague) return false;
+    if (filterMarket !== 'all' && r.market !== filterMarket) return false;
+    if (q) {
+      const blob = `${r.home} ${r.away} ${r.market} ${r.side} ${r.selector} ${r.league}`.toLowerCase();
+      if (!blob.includes(q)) return false;
+    }
+    const kp = getMarketProb(KALSHI, r);
+    const pp = getMarketProb(POLY, r);
+    if (matchedOnly && kp === null && pp === null) return false;
+    if (evOnly) {
+      const ke = calcEdge(r.win_pct, kp);
+      const pe = calcEdge(r.win_pct, pp);
+      const hasEV = (ke !== null && ke > 0) || (pe !== null && pe > 0);
+      if (!hasEV) return false;
+    }
+    return true;
+  });
+
+  return rows.sort((a, b) => {
+    const gka = gameKey(a), gkb = gameKey(b);
+    const kpa = getMarketProb(KALSHI, a), kpb = getMarketProb(KALSHI, b);
+    const ppa = getMarketProb(POLY, a), ppb = getMarketProb(POLY, b);
+    let av, bv;
+    switch(sortCol) {
+      case 'league': av=a.league; bv=b.league; break;
+      case 'game': av=a.home+a.away; bv=b.home+b.away; break;
+      case 'market': av=a.market; bv=b.market; break;
+      case 'side': av=a.side; bv=b.side; break;
+      case 'point': av=parseFloat(a.point)||0; bv=parseFloat(b.point)||0; break;
+      case 'win_pct': av=a.win_pct; bv=b.win_pct; break;
+      case 'k_prob': av=kpa??-99; bv=kpb??-99; break;
+      case 'k_edge': av=calcEdge(a.win_pct,kpa)??-99; bv=calcEdge(b.win_pct,kpb)??-99; break;
+      case 'k_kelly': av=calcHalfKelly(a.win_pct,kpa)??-99; bv=calcHalfKelly(b.win_pct,kpb)??-99; break;
+      case 'p_prob': av=ppa??-99; bv=ppb??-99; break;
+      case 'p_edge': av=calcEdge(a.win_pct,ppa)??-99; bv=calcEdge(b.win_pct,ppb)??-99; break;
+      case 'p_kelly': av=calcHalfKelly(a.win_pct,ppa)??-99; bv=calcHalfKelly(b.win_pct,ppb)??-99; break;
+      default: av=0; bv=0;
+    }
+    return av < bv ? sortDir : av > bv ? -sortDir : 0;
+  });
+}
+
+function render() {
+  const noPred = document.getElementById('noPredNotice');
+  const wrap = document.getElementById('tableWrap');
+  const legend = document.getElementById('legendBar');
+
+  if (!ROWS.length) {
+    noPred.hidden = false; wrap.hidden = true; legend.hidden = true;
+    updateStats();
+    return;
+  }
+  noPred.hidden = true;
+
+  const rows = getFilteredSorted();
+  wrap.hidden = false;
+  legend.hidden = false;
+
+  const tbody = document.getElementById('tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="12"><div class="empty-state">No rows match the current filters.</div></td></tr>';
+    updateStats();
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const kp = getMarketProb(KALSHI, r);
+    const pp = getMarketProb(POLY, r);
+    const ke = calcEdge(r.win_pct, kp);
+    const kk = calcHalfKelly(r.win_pct, kp);
+    const pe = calcEdge(r.win_pct, pp);
+    const pk = calcHalfKelly(r.win_pct, pp);
+
+    const gk = gameKey(r);
+    const kUrl = KALSHI[gk]?.url || null;
+    const pUrl = POLY[gk]?.url || null;
+
+    const ptVal = parseFloat(r.point);
+    const lineStr = !isNaN(ptVal) ? (ptVal > 0 ? '+'+ptVal : ''+ptVal) : (r.point || '—');
+
+    return `<tr>
+      <td><span class="badge ${leagueCls(r.league)}">${r.league.toUpperCase()}</span></td>
+      <td>${r.home} <span style="color:var(--text-2)">vs</span> ${r.away}</td>
+      <td><span class="badge badge-market">${marketLabel(r.market, r.section)}</span></td>
+      <td class="${sideCls(r.side)}">${r.side}</td>
+      <td class="td-mono">${lineStr}</td>
+      <td class="td-mono">${fmtPct(r.win_pct)}</td>
+      <td class="platform-k">${probCell(kp, kUrl, 'k')}</td>
+      <td class="platform-k">${edgeHTML(ke)}</td>
+      <td class="platform-k">${kellyHTML(kk)}</td>
+      <td class="platform-p">${probCell(pp, pUrl, 'p')}</td>
+      <td class="platform-p">${edgeHTML(pe)}</td>
+      <td class="platform-p">${kellyHTML(pk)}</td>
+    </tr>`;
+  }).join('');
+
+  updateStats();
+}
+
+function updateStats() {
+  let kEV=0, pEV=0, kBest=null, pBest=null, kMatch=0, pMatch=0;
+  ROWS.forEach(r => {
+    const kp = getMarketProb(KALSHI, r);
+    const pp = getMarketProb(POLY, r);
+    if (kp !== null) { kMatch++; const e = calcEdge(r.win_pct, kp); if(e>0) kEV++; if(kBest===null||e>kBest) kBest=e; }
+    if (pp !== null) { pMatch++; const e = calcEdge(r.win_pct, pp); if(e>0) pEV++; if(pBest===null||e>pBest) pBest=e; }
+  });
+  document.getElementById('statTotal').textContent = ROWS.length || '—';
+  document.getElementById('statKEV').textContent = kMatch ? kEV : '—';
+  document.getElementById('statPEV').textContent = pMatch ? pEV : '—';
+  document.getElementById('statKBest').textContent = kBest !== null ? (kBest>=0?'+':'')+(kBest*100).toFixed(1)+'%' : '—';
+  document.getElementById('statPBest').textContent = pBest !== null ? (pBest>=0?'+':'')+(pBest*100).toFixed(1)+'%' : '—';
+  document.getElementById('statKMatch').textContent = kMatch ? kMatch+' / '+ROWS.length : '—';
+  document.getElementById('statPMatch').textContent = pMatch ? pMatch+' / '+ROWS.length : '—';
+}
+
+function sortBy(col) {
+  if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+  document.querySelectorAll('thead th').forEach(th => th.classList.remove('sort-asc','sort-desc'));
+  const cols = ['league','game','market','side','point','win_pct','k_prob','k_edge','k_kelly','p_prob','p_edge','p_kelly'];
+  const idx = cols.indexOf(col);
+  if (idx >= 0) {
+    const ths = document.querySelectorAll('thead th');
+    if (ths[idx]) ths[idx].classList.add(sortDir===1?'sort-asc':'sort-desc');
+  }
+  render();
+}
+
+// ── FILTER CHIPS ─────────────────────────────────────────────────────────────
+document.getElementById('leagueChips').addEventListener('click', e => {
+  const chip = e.target.closest('[data-league]'); if (!chip) return;
+  filterLeague = chip.dataset.league;
+  document.querySelectorAll('[data-league]').forEach(c => c.classList.toggle('active', c===chip));
+  render();
+});
+document.getElementById('marketChips').addEventListener('click', e => {
+  const chip = e.target.closest('[data-market]'); if (!chip) return;
+  filterMarket = chip.dataset.market;
+  document.querySelectorAll('[data-market]').forEach(c => c.classList.toggle('active', c===chip));
+  render();
+});
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+refresh();
+</script>
+</body>
+</html>
