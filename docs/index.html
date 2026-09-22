@@ -242,18 +242,28 @@ let kalshiMarkets = [];
 let csvRows = [];
 
 const KALSHI_API = 'https://trading-api.kalshi.com/trade-api/v2';
-const CORS_PROXY = 'https://corsproxy.io/?url=';
 
-async function fetchKalshiLive() {
+async function kalshiPage(urlStr, proxy) {
+  let r;
+  if (!proxy) {
+    r = await fetch(urlStr);
+  } else if (proxy === 'corsproxy') {
+    r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(urlStr));
+  } else if (proxy === 'allorigins') {
+    r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(urlStr));
+  }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function fetchKalshiVia(proxy) {
   const markets = [];
   let cursor = null;
   do {
     const params = new URLSearchParams({ status: 'open', category: 'sports', limit: '200' });
     if (cursor) params.set('cursor', cursor);
     const url = `${KALSHI_API}/markets?${params}`;
-    const r = await fetch(CORS_PROXY + encodeURIComponent(url));
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
+    const data = await kalshiPage(url, proxy);
     const batch = data.markets ?? [];
     markets.push(...batch);
     cursor = (batch.length && data.cursor) ? data.cursor : null;
@@ -261,38 +271,39 @@ async function fetchKalshiLive() {
   return markets;
 }
 
-async function loadKalshi(live = false) {
+async function loadKalshi() {
   const badge = document.getElementById('oddsBadge');
   const btn = document.getElementById('refreshBtn');
-  badge.textContent = 'Loading Kalshi odds…';
+  badge.textContent = 'Fetching live Kalshi odds…';
   badge.className = 'odds-badge warn';
   if (btn) btn.disabled = true;
 
-  // 1. Try live fetch via CORS proxy
-  if (live || true) {
+  // Try: direct → corsproxy.io → allorigins.win → cached JSON
+  for (const proxy of [null, 'corsproxy', 'allorigins']) {
     try {
-      const markets = await fetchKalshiLive();
+      const markets = await fetchKalshiVia(proxy);
       if (markets.length > 0) {
         kalshiMarkets = markets;
-        badge.textContent = `Kalshi: ${markets.length} markets · live ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+        const src = proxy ? ` (via proxy)` : ' (direct)';
+        badge.textContent = `Kalshi: ${markets.length} markets · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${src}`;
         badge.className = 'odds-badge ok';
         if (btn) btn.disabled = false;
         if (csvRows.length) renderTable();
         return;
       }
     } catch (e) {
-      console.warn('Kalshi live fetch failed, falling back to cached JSON:', e);
+      console.warn(`Kalshi fetch via ${proxy ?? 'direct'} failed:`, e.message);
     }
   }
 
-  // 2. Fall back to pre-fetched cached JSON
+  // Final fallback: pre-fetched cached JSON
   try {
     const r = await fetch('kalshi_markets.json');
     const data = await r.json();
     kalshiMarkets = data.markets ?? (Array.isArray(data) ? data : []);
     const updated = data.updated ? new Date(data.updated) : null;
     if (kalshiMarkets.length === 0) {
-      badge.textContent = 'No Kalshi data — click ↻ Refresh to fetch live';
+      badge.textContent = 'Kalshi fetch failed — check console for details';
       badge.className = 'odds-badge warn';
     } else {
       badge.textContent = `Kalshi: ${kalshiMarkets.length} markets (cached)`
