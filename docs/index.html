@@ -36,6 +36,12 @@ header{
 }
 .odds-badge.ok{color:var(--green);border-color:rgba(34,197,94,.3)}
 .odds-badge.warn{color:var(--yellow);border-color:rgba(251,191,36,.3)}
+.api-key-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.api-key-row input{background:var(--surface2);border:1px solid var(--border);border-radius:4px;
+  color:var(--text);font-size:11px;padding:3px 8px;width:220px;outline:none}
+.api-key-row input:focus{border-color:var(--accent)}
+.api-key-row button{padding:3px 8px;font-size:11px;background:transparent;
+  border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer}
 
 /* ── layout ── */
 main{max-width:1200px;margin:0 auto;padding:24px 20px}
@@ -126,8 +132,15 @@ tbody tr.ev-neg td:first-child{border-left:3px solid transparent}
 
 <header>
   <div class="brand">8rain Station<span>®</span> EV Checker</div>
-  <div class="odds-badge warn" id="oddsBadge">Kalshi odds not loaded</div>
-  <button id="refreshBtn" onclick="loadKalshi(true)" style="margin-left:8px;padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;" title="Fetch live Kalshi odds">↻ Refresh</button>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div class="api-key-row">
+      <label for="kalshiKey">Kalshi API key</label>
+      <input id="kalshiKey" type="password" placeholder="paste key…" autocomplete="off">
+      <button onclick="saveKey()">Save</button>
+    </div>
+    <div class="odds-badge warn" id="oddsBadge">Kalshi odds not loaded</div>
+    <button id="refreshBtn" onclick="loadKalshi()" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;" title="Fetch live Kalshi odds">↻ Refresh</button>
+  </div>
 </header>
 
 <main>
@@ -243,27 +256,50 @@ let csvRows = [];
 
 const KALSHI_API = 'https://trading-api.kalshi.com/trade-api/v2';
 
-async function kalshiPage(urlStr, proxy) {
-  let r;
-  if (!proxy) {
-    r = await fetch(urlStr);
-  } else if (proxy === 'corsproxy') {
-    r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(urlStr));
-  } else if (proxy === 'allorigins') {
-    r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(urlStr));
-  }
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+function getKey() {
+  try { return localStorage.getItem('kalshiApiKey') || ''; } catch { return ''; }
+}
+function saveKey() {
+  const k = document.getElementById('kalshiKey').value.trim();
+  try { if (k) localStorage.setItem('kalshiApiKey', k); } catch {}
+  loadKalshi();
 }
 
-async function fetchKalshiVia(proxy) {
+async function kalshiFetch(urlStr) {
+  const key = getKey();
+  const hdrs = { accept: 'application/json' };
+  if (key) hdrs['Authorization'] = `Bearer ${key}`;
+
+  // 1. Try direct (works if Kalshi sends CORS headers, guaranteed with auth)
+  try {
+    const r = await fetch(urlStr, { headers: hdrs });
+    if (r.ok) return r.json();
+    console.warn('Kalshi direct failed:', r.status);
+  } catch(e) { console.warn('Kalshi direct CORS blocked:', e.message); }
+
+  // 2. corsproxy.io — sends server-side request, CORS not an issue
+  try {
+    const r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(urlStr),
+      key ? { headers: { 'x-requested-with': urlStr, Authorization: `Bearer ${key}` } } : {});
+    if (r.ok) return r.json();
+  } catch(e) { console.warn('corsproxy failed:', e.message); }
+
+  // 3. allorigins.win
+  try {
+    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(urlStr));
+    if (r.ok) return r.json();
+  } catch(e) { console.warn('allorigins failed:', e.message); }
+
+  throw new Error('all fetch methods failed');
+}
+
+async function fetchKalshiLive() {
   const markets = [];
   let cursor = null;
   do {
     const params = new URLSearchParams({ status: 'open', category: 'sports', limit: '200' });
     if (cursor) params.set('cursor', cursor);
-    const url = `${KALSHI_API}/markets?${params}`;
-    const data = await kalshiPage(url, proxy);
+    const data = await kalshiFetch(`${KALSHI_API}/markets?${params}`);
     const batch = data.markets ?? [];
     markets.push(...batch);
     cursor = (batch.length && data.cursor) ? data.cursor : null;
@@ -278,22 +314,18 @@ async function loadKalshi() {
   badge.className = 'odds-badge warn';
   if (btn) btn.disabled = true;
 
-  // Try: direct → corsproxy.io → allorigins.win → cached JSON
-  for (const proxy of [null, 'corsproxy', 'allorigins']) {
-    try {
-      const markets = await fetchKalshiVia(proxy);
-      if (markets.length > 0) {
-        kalshiMarkets = markets;
-        const src = proxy ? ` (via proxy)` : ' (direct)';
-        badge.textContent = `Kalshi: ${markets.length} markets · ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${src}`;
-        badge.className = 'odds-badge ok';
-        if (btn) btn.disabled = false;
-        if (csvRows.length) renderTable();
-        return;
-      }
-    } catch (e) {
-      console.warn(`Kalshi fetch via ${proxy ?? 'direct'} failed:`, e.message);
+  try {
+    const markets = await fetchKalshiLive();
+    if (markets.length > 0) {
+      kalshiMarkets = markets;
+      badge.textContent = `Kalshi: ${markets.length} markets · live ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+      badge.className = 'odds-badge ok';
+      if (btn) btn.disabled = false;
+      if (csvRows.length) renderTable();
+      return;
     }
+  } catch (e) {
+    console.error('Kalshi live fetch failed:', e);
   }
 
   // Final fallback: pre-fetched cached JSON
@@ -536,6 +568,12 @@ dz.addEventListener('drop', e => {
 document.getElementById('evOnly').addEventListener('change', renderTable);
 document.getElementById('minEdge').addEventListener('input', renderTable);
 document.getElementById('sortSel').addEventListener('change', renderTable);
+
+// Restore saved API key into input field
+try {
+  const saved = localStorage.getItem('kalshiApiKey');
+  if (saved) document.getElementById('kalshiKey').value = saved;
+} catch {}
 
 loadKalshi();
 </script>
