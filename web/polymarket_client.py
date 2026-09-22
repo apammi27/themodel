@@ -67,6 +67,10 @@ def fetch_all_sports_markets() -> list[dict]:
     _cache["polymarket"] = markets
     _cache_ts = time.time()
     log.info("Polymarket: fetched %d active sports markets", len(markets))
+    # Debug: print first 10 market questions so we can see what's available
+    import sys
+    for i, m in enumerate(markets[:10]):
+        print(f"  POLY[{i}] {m.get('question','')[:100]}", file=sys.stderr)
     return markets
 
 
