@@ -138,8 +138,9 @@ tbody tr.ev-neg td:first-child{border-left:3px solid transparent}
       <input id="kalshiKey" type="password" placeholder="paste key…" autocomplete="off">
       <button onclick="saveKey()">Save</button>
     </div>
-    <div class="odds-badge warn" id="oddsBadge">Kalshi odds not loaded</div>
-    <button id="refreshBtn" onclick="loadKalshi()" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;" title="Fetch live Kalshi odds">↻ Refresh</button>
+    <div class="odds-badge warn" id="oddsBadge">Kalshi not loaded</div>
+    <div class="odds-badge warn" id="polyBadge">Poly not loaded</div>
+    <button id="refreshBtn" onclick="loadKalshi();loadPolymarket()" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;" title="Refresh all odds">↻ Refresh</button>
   </div>
 </header>
 
@@ -373,6 +374,96 @@ function kalshiHomeProbability(league, home, away, market) {
   return homePos <= awayPos ? yesProb : 1 - yesProb;
 }
 
+// ── Polymarket state & fetch ──────────────────────────────────────────────────
+let polyMarkets = [];
+
+async function polyFetch(url) {
+  // Try direct (Gamma API is browser-friendly)
+  try {
+    const r = await fetch(url);
+    if (r.ok) return r.json();
+  } catch(e) { console.warn('Poly direct:', e.message); }
+  // Proxy fallbacks
+  for (const base of ['https://corsproxy.io/?url=', 'https://api.allorigins.win/raw?url=']) {
+    try {
+      const r = await fetch(base + encodeURIComponent(url));
+      if (r.ok) return r.json();
+    } catch(e) { console.warn('Poly proxy failed:', e.message); }
+  }
+  throw new Error('all poly methods failed');
+}
+
+async function loadPolymarket() {
+  const badge = document.getElementById('polyBadge');
+  badge.textContent = 'Poly: loading…';
+  badge.className = 'odds-badge warn';
+  const allMarkets = [];
+  for (const tag of ['nfl', 'football']) {
+    try {
+      const data = await polyFetch(`https://gamma-api.polymarket.com/markets?tag_slug=${tag}&active=true&closed=false&limit=200`);
+      const batch = Array.isArray(data) ? data : (data.markets ?? []);
+      allMarkets.push(...batch);
+      if (allMarkets.length > 0) break;
+    } catch(e) { console.warn('Poly tag', tag, 'failed:', e.message); }
+  }
+  polyMarkets = allMarkets;
+  if (polyMarkets.length > 0) {
+    badge.textContent = `Poly: ${polyMarkets.length} markets · live ${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+    badge.className = 'odds-badge ok';
+    if (csvRows.length) renderTable();
+  } else {
+    badge.textContent = 'Poly: no NFL markets';
+    badge.className = 'odds-badge warn';
+  }
+}
+
+// ── Polymarket matching ───────────────────────────────────────────────────────
+function matchPolymarket(league, home, away) {
+  const homeAliases = getAliases(league, home);
+  const awayAliases = getAliases(league, away);
+  for (const m of polyMarkets) {
+    const text = ((m.question ?? '') + ' ' + (m.description ?? '')).toLowerCase();
+    if (homeAliases.some(a => text.includes(a.toLowerCase())) &&
+        awayAliases.some(a => text.includes(a.toLowerCase()))) return m;
+  }
+  return null;
+}
+
+function parsePolyArr(val) {
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') { try { return JSON.parse(val); } catch {} }
+  return null;
+}
+
+function polyHomeProbability(league, home, away, market) {
+  const outcomes = parsePolyArr(market.outcomes);
+  const prices   = parsePolyArr(market.outcomePrices);
+  if (!outcomes || !prices || outcomes.length !== prices.length) return null;
+
+  const homeAliases = getAliases(league, home);
+  const awayAliases = getAliases(league, away);
+
+  // Named outcomes (e.g. "Bills", "Chargers")
+  let homeIdx = null, awayIdx = null;
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i].toLowerCase();
+    if (homeAliases.some(a => o.includes(a.toLowerCase()))) homeIdx = i;
+    else if (awayAliases.some(a => o.includes(a.toLowerCase()))) awayIdx = i;
+  }
+  if (homeIdx != null && awayIdx != null) return parseFloat(prices[homeIdx]);
+
+  // Yes/No market — determine which team the question is about
+  if (outcomes.length === 2 && outcomes[0].toLowerCase() === 'yes') {
+    const q = (market.question ?? '').toLowerCase();
+    const homePos = Math.min(...homeAliases.map(a => { const i = q.indexOf(a.toLowerCase()); return i >= 0 ? i : 9999; }));
+    const awayPos = Math.min(...awayAliases.map(a => { const i = q.indexOf(a.toLowerCase()); return i >= 0 ? i : 9999; }));
+    if (homePos === 9999 && awayPos === 9999) return null;
+    const yesProb = parseFloat(prices[0]);
+    return homePos <= awayPos ? yesProb : 1 - yesProb;
+  }
+  return null;
+}
+
 // ── CSV parsing ───────────────────────────────────────────────────────────────
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
@@ -451,26 +542,41 @@ function renderTable() {
   const sortBy = document.getElementById('sortSel').value;
 
   let rows = csvRows.map(r => {
+    const isHome = r.side === 'home' || r.side === r.home.toLowerCase();
+
     const km = matchKalshi(r.league, r.home, r.away);
     let kProb = null, kEdge = null, kUrl = null, kTitle = null;
     if (km) {
       const hp = kalshiHomeProbability(r.league, r.home, r.away, km);
       if (hp != null) {
-        const isHomeSide = r.side === 'home' || r.side === r.home.toLowerCase();
-        kProb  = isHomeSide ? hp : 1 - hp;
+        kProb  = isHome ? hp : 1 - hp;
         kEdge  = r.prob - kProb;
         kUrl   = `https://kalshi.com/markets/${km.ticker ?? ''}`;
         kTitle = (km.title ?? '').trim();
       }
     }
-    return { ...r, kProb, kEdge, kUrl, kTitle };
+
+    const pm = matchPolymarket(r.league, r.home, r.away);
+    let pProb = null, pEdge = null, pUrl = null;
+    if (pm) {
+      const hp = polyHomeProbability(r.league, r.home, r.away, pm);
+      if (hp != null) {
+        pProb = isHome ? hp : 1 - hp;
+        pEdge = r.prob - pProb;
+        const slug = pm.slug ?? pm.conditionId ?? '';
+        pUrl  = slug ? `https://polymarket.com/event/${slug}` : 'https://polymarket.com';
+      }
+    }
+
+    const bestEdge = Math.max(kEdge ?? -99, pEdge ?? -99);
+    return { ...r, kProb, kEdge, kUrl, kTitle, pProb, pEdge, pUrl, bestEdge };
   });
 
-  if (evOnly) rows = rows.filter(r => r.kEdge != null && r.kEdge > 0);
-  if (minEdge > 0) rows = rows.filter(r => r.kEdge != null && r.kEdge >= minEdge);
+  if (evOnly) rows = rows.filter(r => (r.kEdge != null && r.kEdge > 0) || (r.pEdge != null && r.pEdge > 0));
+  if (minEdge > 0) rows = rows.filter(r => (r.kEdge != null && r.kEdge >= minEdge) || (r.pEdge != null && r.pEdge >= minEdge));
 
   if (sortBy === 'edge') {
-    rows.sort((a, b) => (b.kEdge ?? -99) - (a.kEdge ?? -99));
+    rows.sort((a, b) => b.bestEdge - a.bestEdge);
   } else if (sortBy === 'model') {
     rows.sort((a, b) => b.prob - a.prob);
   } else {
@@ -489,28 +595,36 @@ function renderTable() {
   let html = `<table>
 <thead><tr>
   ${th('DATE')}${th('MATCHUP')}${th('MARKET')}${th('SIDE')}${th('MODEL %','Your model win probability')}
-  ${th('KALSHI %','Kalshi implied probability (yes_ask/100)')}
-  ${th('K EDGE','Model% − Kalshi% (positive = model sees value)')}
-  ${th('½ KELLY','Suggested bet size (half-Kelly criterion)')}
-  ${th('LINK')}
+  ${th('KALSHI %','Kalshi implied probability')}
+  ${th('K EDGE','Model% − Kalshi%')}
+  ${th('POLY %','Polymarket implied probability')}
+  ${th('P EDGE','Model% − Polymarket%')}
+  ${th('½ KELLY','Half-Kelly on best edge')}
+  ${th('LINKS')}
 </tr></thead><tbody>`;
 
   for (const r of rows) {
-    const ev = r.kEdge != null && r.kEdge > 0;
+    const ev = (r.kEdge != null && r.kEdge > 0) || (r.pEdge != null && r.pEdge > 0);
     const rowCls = ev ? 'ev-pos' : 'ev-neg';
     const sideLabel = r.side === 'home' ? teamLabel(r.league, r.home)
                     : r.side === 'away' ? teamLabel(r.league, r.away)
                     : r.side.charAt(0).toUpperCase() + r.side.slice(1);
     const matchup = `${teamLabel(r.league, r.home)} <span style="color:var(--muted)">vs</span> ${teamLabel(r.league, r.away)}`;
-    const edgeCls = r.kEdge == null ? 'dash'
-                  : r.kEdge > 0.05  ? 'edge-strong'
-                  : r.kEdge > 0     ? 'edge-pos'
-                  : 'edge-neg';
-    const edgeTxt = r.kEdge != null
-      ? `<span class="${edgeCls}">${r.kEdge > 0 ? '+' : ''}${(r.kEdge * 100).toFixed(1)}%</span>`
-      : '<span class="dash">—</span>';
-    const kelly = r.kEdge != null && r.kEdge > 0 ? (halfKelly(r.prob, r.kProb) * 100).toFixed(1) + '%' : '<span class="dash">—</span>';
-    const link = r.kUrl ? `<a class="link-icon" href="${r.kUrl}" target="_blank" title="${r.kTitle}">↗</a>` : '<span class="dash">—</span>';
+
+    function edgeCell(edge) {
+      if (edge == null) return '<span class="dash">—</span>';
+      const cls = edge > 0.05 ? 'edge-strong' : edge > 0 ? 'edge-pos' : 'edge-neg';
+      return `<span class="${cls}">${edge > 0 ? '+' : ''}${(edge * 100).toFixed(1)}%</span>`;
+    }
+
+    // Kelly on best edge available
+    const bestProb = (r.kEdge ?? -99) >= (r.pEdge ?? -99) ? r.kProb : r.pProb;
+    const bestEdgeVal = r.bestEdge > 0 ? r.bestEdge : null;
+    const kelly = bestEdgeVal != null ? (halfKelly(r.prob, bestProb) * 100).toFixed(1) + '%' : '<span class="dash">—</span>';
+
+    const kLink = r.kUrl ? `<a class="link-icon" href="${r.kUrl}" target="_blank" title="${r.kTitle}">K↗</a>` : '';
+    const pLink = r.pUrl ? `<a class="link-icon" href="${r.pUrl}" target="_blank">P↗</a>` : '';
+    const links = (kLink || pLink) ? [kLink, pLink].filter(Boolean).join(' ') : '<span class="dash">—</span>';
 
     let pointStr = r.point ? ` <span style="color:var(--muted);font-size:11px">(${r.point})</span>` : '';
 
@@ -521,9 +635,11 @@ function renderTable() {
   <td><strong>${sideLabel}</strong></td>
   <td class="prob">${fmtPct(r.prob)}</td>
   <td>${fmtPct(r.kProb)}</td>
-  <td>${edgeTxt}</td>
+  <td>${edgeCell(r.kEdge)}</td>
+  <td>${fmtPct(r.pProb)}</td>
+  <td>${edgeCell(r.pEdge)}</td>
   <td>${kelly}</td>
-  <td>${link}</td>
+  <td>${links}</td>
 </tr>`;
   }
   html += '</tbody></table>';
@@ -576,5 +692,6 @@ try {
 } catch {}
 
 loadKalshi();
+loadPolymarket();
 </script>
 </html>
