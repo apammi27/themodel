@@ -26,6 +26,13 @@ Usage examples
 
 # Reset (re-bootstrap) Elo for a league:
     python main.py reset --sports nba
+
+# Run model + live Kalshi/Polymarket edge table (prints to terminal):
+    python main.py edge --date 2025-04-15
+    python main.py edge --date 2025-04-15 --sports nba,mlb
+    python main.py edge --ev-only
+    python main.py edge --min-edge 0.03
+    python main.py edge --demo
 """
 
 import json
@@ -210,6 +217,206 @@ def regress(sports, ratings):
         ratings_store.apply_season_regression(store, league)
         log.info("Regressed %s Elo ratings to mean.", league.upper())
     ratings_store.save(store, ratings)
+
+
+@cli.command()
+@click.option("--sports", default="nba,nfl,mlb,wnba,epl")
+@click.option("--date", "game_date", default=None, help="Date in YYYY-MM-DD format (default: today)")
+@click.option("--ratings", default=DEFAULT_RATINGS)
+@click.option("--cache", default=DEFAULT_CACHE)
+@click.option("--lookback", default=DEFAULT_LOOKBACK, type=int)
+@click.option("--demo", is_flag=True, help="Use built-in demo data (no network required for model)")
+@click.option("--ev-only", is_flag=True, help="Only show rows with positive edge on at least one platform")
+@click.option("--min-edge", default=0.0, type=float,
+              help="Minimum edge threshold to display (e.g. 0.03 = show only 3 %+ edges)")
+@click.option("--kalshi-key", default=None, envvar="KALSHI_API_KEY")
+def edge(sports, game_date, ratings, cache, lookback, demo, ev_only, min_edge, kalshi_key):
+    """Run model + fetch live Kalshi/Polymarket odds and print edge table to terminal."""
+    from web.kalshi_client import build_odds_map as kalshi_map
+    from web.polymarket_client import build_odds_map as poly_map
+
+    leagues = [s.strip().lower() for s in sports.split(",") if s.strip()]
+    target_date = parse_date(game_date) if game_date else date.today()
+
+    log.info("Running model for %s | sports: %s", target_date, leagues)
+    if demo:
+        rows = run_demo(leagues=leagues, game_date=target_date, ratings_path=ratings)
+    else:
+        rows = run_daily(
+            leagues=leagues, game_date=target_date, ratings_path=ratings,
+            cache_dir=cache, prop_lookback=lookback,
+        )
+
+    if not rows:
+        click.echo(f"No predictions generated for {target_date}.")
+        return
+
+    # Collect unique games for market lookup
+    games: list[tuple] = []
+    seen: set = set()
+    for r in rows:
+        key = (r.league.lower(), r.home, r.away, str(r.date))
+        if key not in seen:
+            seen.add(key)
+            games.append(key)
+
+    log.info("Fetching Kalshi markets…")
+    try:
+        k_odds = kalshi_map(games, api_key=kalshi_key)
+    except Exception as exc:
+        log.warning("Kalshi fetch failed: %s", exc)
+        k_odds = {}
+
+    log.info("Fetching Polymarket markets…")
+    try:
+        p_odds = poly_map(games)
+    except Exception as exc:
+        log.warning("Polymarket fetch failed: %s", exc)
+        p_odds = {}
+
+    def game_key(r):
+        return f"{r.league.upper()}|{r.date}|{r.home}|{r.away}"
+
+    def mkt_prob(oddsmap, r):
+        m = oddsmap.get(game_key(r))
+        if not m or not m.get("matched"):
+            return None
+        return m.get("home_prob") if r.side == "home" else m.get("away_prob") if r.side == "away" else None
+
+    def edge_val(model_p, mkt_p):
+        return round(model_p - mkt_p, 4) if mkt_p is not None else None
+
+    def half_kelly(model_p, mkt_p):
+        if mkt_p is None or mkt_p <= 0 or mkt_p >= 1:
+            return None
+        b = (1 / mkt_p) - 1
+        f = (b * model_p - (1 - model_p)) / b
+        return round(f / 2, 4) if f > 0 else None
+
+    def fmt_pct(v):
+        return f"{v*100:5.1f}%" if v is not None else "   — "
+
+    def fmt_edge(v):
+        if v is None:
+            return "    — "
+        sign = "+" if v >= 0 else ""
+        return f"{sign}{v*100:.1f}%"
+
+    def fmt_kelly(v):
+        return f"{v*100:.1f}%" if v is not None else "—"
+
+    # Filter and sort
+    display_rows = []
+    for r in rows:
+        if r.market not in ("h2h", "spread", "total", "team_prop"):
+            continue  # skip player props for now
+        kp = mkt_prob(k_odds, r)
+        pp = mkt_prob(p_odds, r)
+        ke = edge_val(r.win_pct, kp)
+        pe = edge_val(r.win_pct, pp)
+        kk = half_kelly(r.win_pct, kp)
+        pk = half_kelly(r.win_pct, pp)
+
+        if ev_only:
+            if not ((ke is not None and ke > 0) or (pe is not None and pe > 0)):
+                continue
+        if min_edge > 0:
+            best = max((e for e in [ke, pe] if e is not None), default=None)
+            if best is None or best < min_edge:
+                continue
+
+        display_rows.append((r, kp, ke, kk, pp, pe, pk))
+
+    if not display_rows:
+        click.echo("No rows match the filters. Try removing --ev-only or --min-edge.")
+        return
+
+    # Sort by best edge descending
+    display_rows.sort(
+        key=lambda x: max((e for e in [x[2], x[5]] if e is not None), default=-99),
+        reverse=True,
+    )
+
+    # ── Print table ──────────────────────────────────────────────────────────
+    MARKET_LABELS = {"h2h": "ML", "spread": "Spread", "total": "Total",
+                     "team_prop": "Team", "player_prop": "Prop"}
+
+    W_LEAGUE = 5
+    W_GAME   = 14
+    W_MKT    = 7
+    W_SIDE   = 5
+    W_LINE   = 6
+    W_MODEL  = 7
+    W_KPROB  = 7
+    W_KEDGE  = 7
+    W_KK     = 6
+    W_PPROB  = 7
+    W_PEDGE  = 7
+    W_PK     = 6
+
+    def col(s, w, align="<"):
+        return f"{str(s):{align}{w}}"
+
+    hdr = (
+        col("LEAG",  W_LEAGUE) + "  " +
+        col("GAME",  W_GAME)   + "  " +
+        col("MKT",   W_MKT)    + "  " +
+        col("SIDE",  W_SIDE)   + "  " +
+        col("LINE",  W_LINE)   + "  " +
+        col("MODEL", W_MODEL, ">") + "  " +
+        col("K%",    W_KPROB,  ">") + "  " +
+        col("K EDGE",W_KEDGE,  ">") + "  " +
+        col("K ½K",  W_KK,     ">") + "  " +
+        col("P%",    W_PPROB,  ">") + "  " +
+        col("P EDGE",W_PEDGE,  ">") + "  " +
+        col("P ½K",  W_PK,     ">")
+    )
+    divider = "─" * len(hdr)
+
+    click.echo(f"\n  8rain Station® Edge Report — {target_date}  ({len(display_rows)} rows)\n")
+    click.echo("  " + hdr)
+    click.echo("  " + divider)
+
+    for r, kp, ke, kk, pp, pe, pk in display_rows:
+        game_str = f"{r.home}/{r.away}"
+        line_str = f"{r.point:+g}" if r.point not in ("", None) else "—"
+        mkt_label = MARKET_LABELS.get(r.market, r.market)
+
+        def edge_str(e, k):
+            if e is None:
+                return col("—", W_KEDGE, ">"), col("—", W_KK, ">")
+            sign = "+" if e >= 0 else ""
+            ek = f"{sign}{e*100:.1f}%"
+            kstr = fmt_kelly(k)
+            return col(ek, W_KEDGE, ">"), col(kstr, W_KK, ">")
+
+        k_edge_s, k_k_s = edge_str(ke, kk)
+        p_edge_s, p_k_s = edge_str(pe, pk)
+
+        line = (
+            col(r.league.upper(), W_LEAGUE) + "  " +
+            col(game_str[:W_GAME], W_GAME)  + "  " +
+            col(mkt_label,  W_MKT)          + "  " +
+            col(r.side[:W_SIDE], W_SIDE)    + "  " +
+            col(line_str,   W_LINE)         + "  " +
+            col(fmt_pct(r.win_pct), W_MODEL, ">") + "  " +
+            col(fmt_pct(kp), W_KPROB, ">") + "  " +
+            k_edge_s + "  " + k_k_s         + "  " +
+            col(fmt_pct(pp), W_PPROB, ">") + "  " +
+            p_edge_s + "  " + p_k_s
+        )
+        click.echo("  " + line)
+
+    click.echo("  " + divider)
+
+    # Summary
+    k_ev = sum(1 for _, _, ke, _, _, _, _ in display_rows if ke is not None and ke > 0)
+    p_ev = sum(1 for _, _, _, _, _, pe, _ in display_rows if pe is not None and pe > 0)
+    k_matched = sum(1 for _, kp, _, _, _, _, _ in display_rows if kp is not None)
+    p_matched = sum(1 for _, _, _, _, pp, _, _ in display_rows if pp is not None)
+    click.echo(f"\n  Kalshi:     {k_matched} matched, {k_ev} +EV")
+    click.echo(f"  Polymarket: {p_matched} matched, {p_ev} +EV")
+    click.echo()
 
 
 @cli.command()
