@@ -251,6 +251,8 @@ def edge(sports, game_date, ratings, cache, lookback, demo, ev_only, min_edge, k
         click.echo(f"No predictions generated for {target_date}.")
         return
 
+    click.echo(f"DEBUG: {len(rows)} total rows; markets={sorted(set(r.market for r in rows))}")
+
     # Collect unique games for market lookup
     games: list[tuple] = []
     seen: set = set()
