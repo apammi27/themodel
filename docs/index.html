@@ -372,23 +372,24 @@ async function loadPolymarket() {
     const data = await polyFetch('https://gamma-api.polymarket.com/events?tag_slug=nfl&active=true&closed=false&limit=200');
     const events = Array.isArray(data) ? data : (data.events ?? []);
     for (const ev of events) {
-      const evMarkets = ev.markets ?? [];
       const evSlug = ev.slug ?? '';
       const evQuestion = ev.title ?? ev.question ?? '';
-      if (evMarkets.length) {
-        for (const m of evMarkets) {
-          // Carry event-level fields so matching and linking work
-          m._evSlug     = evSlug;
-          m._evQuestion = evQuestion;
-          m._evEndDate  = ev.endDate ?? '';
-          if (!m.question) m.question = evQuestion;
-          if (!m.endDate)  m.endDate  = ev.endDate ?? '';
-          allMarkets.push(m);
-        }
-      } else if (ev.outcomePrices || ev.outcomes) {
-        // Event is the market itself
+      // Always include the event itself if it has price data — this is the main moneyline
+      // with named outcomes like ["Cardinals","49ers"] and is more reliable than sub-markets
+      if (ev.outcomePrices || ev.outcomes) {
         ev._evSlug = evSlug;
+        ev._evQuestion = evQuestion;
+        if (!ev.question) ev.question = evQuestion;
         allMarkets.push(ev);
+      }
+      // Also include sub-markets (for spread/total or fallback)
+      for (const m of ev.markets ?? []) {
+        m._evSlug     = evSlug;
+        m._evQuestion = evQuestion;
+        m._evEndDate  = ev.endDate ?? '';
+        if (!m.question) m.question = evQuestion;
+        if (!m.endDate)  m.endDate  = ev.endDate ?? '';
+        allMarkets.push(m);
       }
     }
     console.log('[Poly] events:', events.length, '→ flat markets:', allMarkets.length);
@@ -449,10 +450,17 @@ function matchPolymarket(league, home, away) {
     candidates.push({ m, daysOut });
   }
   if (!candidates.length) return null;
-  // Pick closest closing date (most likely the actual game market)
-  candidates.sort((a, b) => a.daysOut - b.daysOut);
-  const match = candidates[0].m;
-  console.log(`[Poly] ${home} vs ${away} → q:"${match.question}" end:${match.endDate} slug:${match.slug} evSlug:${match._evSlug} prices:${match.outcomePrices} outcomes:${match.outcomes}`);
+  // Prefer named-outcome markets (e.g. ["Cardinals","49ers"]) over Yes/No markets —
+  // they're more reliable and are the event-level moneyline we actually want
+  const named = candidates.filter(c => {
+    const outs = parsePolyArr(c.m.outcomes);
+    return outs && outs.length >= 2 && outs[0].toLowerCase() !== 'yes' && outs[0].toLowerCase() !== 'no';
+  });
+  const pool = named.length ? named : candidates;
+  // Within the preferred pool, pick closest closing date (game market closes first)
+  pool.sort((a, b) => a.daysOut - b.daysOut);
+  const match = pool[0].m;
+  console.log(`[Poly] ${home} vs ${away} → q:"${match.question}" outcomes:${match.outcomes} prices:${match.outcomePrices} end:${match.endDate} evSlug:${match._evSlug}`);
   return match;
 }
 
